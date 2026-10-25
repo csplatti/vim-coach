@@ -197,11 +197,11 @@ launch or push to the review app automatically, so the old inline card remains
 only as a legacy demo fixture (`demo/suggestion.lua`) and is not used by
 automatic capture.
 
-The first review-app shell is in `review_app/`. From that directory, run
-`npm install` once and then `npm start`. It reads the same history file and
-supports review, dismiss, I Know, reset, and an indeterminate loading bar while
-the worker evaluates a batch. Practice is intentionally marked as the next
-step because raw practice snapshots are not persisted.
+The Electron training dashboard is in `review_app/`. From that directory, run
+`npm install` once and then `npm start`. It shares both lesson history and goal
+progress with Neovim. Challenges show live repetition progress, pause/resume
+controls, mastery stats, levels, and completed achievements; the Lessons tab
+retains review, dismiss, I Know, and reset actions.
 
 ## Practice drill
 
@@ -304,9 +304,10 @@ Provider prompt logging remains available as an explicit backend diagnostic,
 but the demo keeps it disabled and the Electron app does not print captured
 prompts or responses to its terminal.
 
-The review inbox updates through a filesystem watcher on `lessons.json`; lesson
-cards are pushed to the renderer over Electron IPC rather than polled. Worker
-status remains polled for the short-lived loading indicator.
+The dashboard updates through filesystem watchers on `lessons.json` and
+`goals.json`; lesson and challenge changes are pushed to the renderer over
+Electron IPC rather than polled. Worker status remains polled for the
+short-lived loading indicator.
 
 ## Current limits
 
