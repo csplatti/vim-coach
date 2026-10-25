@@ -28,8 +28,15 @@ nvim -u demo/minimal.lua
 ```
 
 This loads the plugin directly from the checkout with local recording enabled
-and cloud analysis disabled. Step 1 provides the setup, configuration, and
-public command surface; automatic recording is implemented in the next step.
+and cloud analysis disabled. The recorder currently supports bounded ASCII
+Normal-mode motion and deletion episodes. It waits for the configured idle
+boundary, discards navigation-only edits, and keeps snapshots in memory.
+
+To see capture status without source text:
+
+```vim
+:VimCoachStatus
+```
 
 Available commands:
 
