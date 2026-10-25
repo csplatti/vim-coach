@@ -24,6 +24,6 @@ require("vim_coach").setup({
   provider_timeout_ms = 10000,
   replay_timeout_ms = 1000,
   -- Development only: prints captured source text and the full LLM request.
-  debug_prompt = true,
+  debug_prompt = false,
   worker_cwd = repo_root,
 })

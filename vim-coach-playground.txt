@@ -1,0 +1,73 @@
+VIM COACH PLAYGROUND
+====================
+
+Do these tasks naturally. Before each task, place your cursor where the task
+says and pause for about a quarter second. Pause again after completing the
+task so Vim Coach can record it.
+
+
+TASK 1
+Place your cursor on the first X. Delete all five X letters one at a time.
+
+keep XXXXX keep
+
+
+TASK 2
+Place your cursor on the h in hello. Delete only the word inside the quotes.
+Delete it one letter at a time.
+
+say "hello" now
+
+
+TASK 3
+Place your cursor on the a in alpha. Delete only the word inside the
+parentheses, one letter at a time.
+
+call(alpha)
+
+
+TASK 4
+Place your cursor on the first letter of alpha. Change alpha to beta by
+deleting the old word, entering Insert mode, and typing the new word.
+
+alpha
+
+
+TASK 5
+Place your cursor on the underscore. Replace it with a hyphen by deleting the
+underscore, entering Insert mode, and typing the hyphen.
+
+hello_world
+
+
+TASK 6
+Place your cursor on the first D. Use Visual mode to select the word DELETE,
+then delete it.
+
+DELETE this word
+
+
+TASK 7
+Place your cursor on the opening parenthesis. Move to the closing parenthesis
+one character at a time.
+
+(jump over this text)
+
+
+TASK 8
+Place your cursor on the first letter of "start". Move to the X one character
+at a time.
+
+start moving toward X please
+
+
+TASK 9
+Place your cursor on the O in One. Move to the T in Two one character at a
+time.
+
+One. Two.
+
+
+When you are finished, pause and sync Vim Coach. Open the review app to see
+which shorter techniques it found. A technique already in your lesson history
+may not appear again.

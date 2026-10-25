@@ -300,11 +300,9 @@ The minimal demo reads that opt-in from `VIM_COACH_CLOUD`:
 VIM_COACH_CLOUD=1 nvim -u demo/minimal.lua -i NONE -n
 ```
 
-The development demo enables `debug_prompt = true`. The Electron process tails
-the local debug stream and prints the formatted LLM request, response, and replay
-result in the terminal running `npm start`. Restart the Electron app after code
-changes to enable the watcher. Debug requests include captured buffer text, so
-keep the option disabled for private files.
+Provider prompt logging remains available as an explicit backend diagnostic,
+but the demo keeps it disabled and the Electron app does not print captured
+prompts or responses to its terminal.
 
 The review inbox updates through a filesystem watcher on `lessons.json`; lesson
 cards are pushed to the renderer over Electron IPC rather than polled. Worker

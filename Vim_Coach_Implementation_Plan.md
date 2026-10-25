@@ -174,7 +174,7 @@ Implement this public interface in your plugin; these are proposed names, not an
 require("vim_coach").setup({
   enabled = true,                 -- automatic local recording
   cloud_enabled = false,          -- enable only after explicit opt-in
-  idle_ms = 1000,
+  idle_ms = 250,
   cooldown_ms = 60000,
   max_lines = 100,
   max_buffer_bytes = 8192,
