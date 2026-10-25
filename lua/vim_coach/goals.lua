@@ -5,20 +5,11 @@ local M = {}
 local state = {
   buffer = nil,
   line_goals = {},
+  first_goal_line = nil,
 }
 
 local function binding(goal)
   return table.concat(goal.binding or {}, "")
-end
-
-local function status_icon(goal)
-  if goal.status == "completed" then
-    return "✓"
-  end
-  if goal.status == "paused" then
-    return "Ⅱ"
-  end
-  return "›"
 end
 
 local function render()
@@ -40,15 +31,18 @@ local function render()
   local lines = {
     " Vim Coach Goals",
     "",
+    " Status     Progress    Binding   Feature",
+    " ---------  ----------  --------  -------",
   }
   state.line_goals = {}
+  state.first_goal_line = nil
   if #all == 0 then
     lines[#lines + 1] = " No goals yet. Review a lesson to begin."
   else
     for _, goal in ipairs(all) do
       local line = string.format(
-        " %s %3d / %-3d  %-8s %s",
-        status_icon(goal),
+        " %-9s  %3d / %-3d  %-8s  %s",
+        goal.status or "unknown",
         goal.progress or 0,
         goal.target or 0,
         binding(goal),
@@ -56,6 +50,7 @@ local function render()
       )
       lines[#lines + 1] = line
       state.line_goals[#lines] = goal.featureId
+      state.first_goal_line = state.first_goal_line or #lines
     end
   end
   lines[#lines + 1] = ""
@@ -125,7 +120,7 @@ function M.open()
   end)
 
   render()
-  vim.api.nvim_win_set_cursor(0, { #progress.goals() > 0 and 3 or 1, 0 })
+  vim.api.nvim_win_set_cursor(0, { state.first_goal_line or 1, 0 })
 end
 
 return M
