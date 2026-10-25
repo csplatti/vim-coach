@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def run(command: list[str]) -> None:
     print("$", " ".join(command))
-    subprocess.run(command, cwd=ROOT, check=True)
+    if command[0] != "nvim":
+        subprocess.run(command, cwd=ROOT, check=True)
+        return
+    with tempfile.TemporaryDirectory(prefix="vim-coach-check-") as directory:
+        environment = os.environ.copy()
+        environment["VIM_COACH_HISTORY_FILE"] = str(Path(directory) / "lessons.json")
+        environment["VIM_COACH_GOALS_FILE"] = str(Path(directory) / "goals.json")
+        subprocess.run(command, cwd=ROOT, check=True, env=environment)
 
 
 def main() -> int:
