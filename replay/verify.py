@@ -139,29 +139,16 @@ def _state_projection(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def verify(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("schemaVersion") != 1:
-        raise ValueError("unsupported schema version")
-    before = payload.get("before")
-    expected_after = payload.get("after")
-    original = payload.get("originalTokens")
-    candidate = payload.get("candidateTokens")
-    if not isinstance(before, dict) or not isinstance(expected_after, dict):
-        raise ValueError("before and after snapshots are required")
-
-    for label, tokens in (("originalTokens", original), ("candidateTokens", candidate)):
-        valid, reason = validate_tokens(tokens)
-        if not valid:
-            raise ValueError(f"{label}: {reason}")
-
-    started = time.monotonic()
-    original_state = _run_child(before, original, DEFAULT_TIMEOUT_SECONDS)
-    original_latency_ms = round((time.monotonic() - started) * 1000, 2)
-
-    started = time.monotonic()
-    candidate_state = _run_child(before, candidate, DEFAULT_TIMEOUT_SECONDS)
-    candidate_latency_ms = round((time.monotonic() - started) * 1000, 2)
-
+def _verification_result(
+    expected_after: dict[str, Any],
+    original_state: dict[str, Any],
+    candidate_state: dict[str, Any],
+    original: list[str],
+    candidate: list[str],
+    original_latency_ms: float,
+    candidate_latency_ms: float,
+    require_register_equality: bool,
+) -> dict[str, Any]:
     expected_projection = _state_projection(expected_after)
     original_projection = _state_projection(original_state)
     candidate_projection = _state_projection(candidate_state)
@@ -176,7 +163,8 @@ def verify(payload: dict[str, Any]) -> dict[str, Any]:
     # reconstructible in a fresh child because restoring numbered registers can
     # itself alter register state. Compare candidate side effects with the
     # original replay instead; both runs start from the same reconstructed state.
-    if candidate_projection.get("trackedRegisters") != original_projection.get("trackedRegisters"):
+    registers_equal = candidate_projection.get("trackedRegisters") == original_projection.get("trackedRegisters")
+    if require_register_equality and not registers_equal:
         candidate_mismatch_fields.append("trackedRegisters")
     original_matches = not original_mismatch_fields
     candidate_matches = not candidate_mismatch_fields
@@ -197,6 +185,8 @@ def verify(payload: dict[str, Any]) -> dict[str, Any]:
         "accepted": reason is None,
         "originalReplayMatches": original_matches,
         "candidateReplayMatches": candidate_matches,
+        "registersEqual": registers_equal,
+        "comparisonPolicy": "full-state" if require_register_equality else "editing-outcome",
         "originalMismatchFields": original_mismatch_fields,
         "candidateMismatchFields": candidate_mismatch_fields,
         "originalLogicalKeys": original_count,
@@ -206,6 +196,57 @@ def verify(payload: dict[str, Any]) -> dict[str, Any]:
         "originalReplayLatencyMs": original_latency_ms,
         "candidateReplayLatencyMs": candidate_latency_ms,
     }
+
+
+def verify_many(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Verify many candidates while replaying the original only once."""
+    if payload.get("schemaVersion") != 1:
+        raise ValueError("unsupported schema version")
+    before = payload.get("before")
+    expected_after = payload.get("after")
+    original = payload.get("originalTokens")
+    candidates = payload.get("candidateTokenSets")
+    require_register_equality = payload.get("requireRegisterEquality", True) is not False
+    if not isinstance(before, dict) or not isinstance(expected_after, dict):
+        raise ValueError("before and after snapshots are required")
+    valid, reason = validate_tokens(original)
+    if not valid:
+        raise ValueError(f"originalTokens: {reason}")
+    if not isinstance(candidates, list):
+        raise ValueError("candidateTokenSets must be an array")
+    for index, candidate in enumerate(candidates):
+        valid, reason = validate_tokens(candidate)
+        if not valid:
+            raise ValueError(f"candidateTokenSets[{index}]: {reason}")
+
+    started = time.monotonic()
+    original_state = _run_child(before, original, DEFAULT_TIMEOUT_SECONDS)
+    original_latency_ms = round((time.monotonic() - started) * 1000, 2)
+    results = []
+    for candidate in candidates:
+        started = time.monotonic()
+        candidate_state = _run_child(before, candidate, DEFAULT_TIMEOUT_SECONDS)
+        candidate_latency_ms = round((time.monotonic() - started) * 1000, 2)
+        results.append(_verification_result(
+            expected_after,
+            original_state,
+            candidate_state,
+            original,
+            candidate,
+            original_latency_ms,
+            candidate_latency_ms,
+            require_register_equality,
+        ))
+    return results
+
+
+def verify(payload: dict[str, Any]) -> dict[str, Any]:
+    candidate = payload.get("candidateTokens")
+    results = verify_many({
+        **payload,
+        "candidateTokenSets": [candidate],
+    })
+    return results[0]
 
 
 def main(argv: list[str]) -> int:

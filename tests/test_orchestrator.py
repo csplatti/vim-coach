@@ -13,15 +13,16 @@ class OrchestratorTests(unittest.TestCase):
         result = augment_local_candidates([{
             "id": 9,
             "kind": "navigation",
+            "resolvedTokens": list("llllllll"),
+            "before": {"cursor": {"row1Based": 1, "byteColumn0Based": 0}},
+            "after": {"cursor": {"row1Based": 1, "byteColumn0Based": 7}},
         }], [])
         candidates = result[0]["candidates"]
-        self.assertEqual(
-            [candidate["compiledTokens"] for candidate in candidates],
-            [
-                ["w"], ["b"], ["e"], ["W"], ["B"], ["E"], ["g", "e"],
-                ["g", "g"], ["G"], ["0"], ["^"], ["$"], ["%"],
-            ],
-        )
+        compiled = [candidate["compiledTokens"] for candidate in candidates]
+        self.assertIn(["w"], compiled)
+        self.assertIn(["g", "e"], compiled)
+        self.assertIn(["%"], compiled)
+        self.assertIn(["7", "l"], compiled)
 
     def test_augments_repeated_motion_with_a_count(self):
         result = augment_local_candidates([{
@@ -29,7 +30,10 @@ class OrchestratorTests(unittest.TestCase):
             "kind": "edit",
             "resolvedTokens": ["0", "w", "w", "w", "x"],
         }], [])
-        candidate = result[0]["candidates"][0]
+        candidate = next(
+            item for item in result[0]["candidates"]
+            if item["compiledTokens"] == ["0", "3", "w", "x"]
+        )
         self.assertEqual(candidate["compiledTokens"], ["0", "3", "w", "x"])
         self.assertEqual(candidate["tokens"], [
             {"kind": "move", "key": "0"},
@@ -59,7 +63,7 @@ class OrchestratorTests(unittest.TestCase):
             "originalReplayLatencyMs": 1,
             "candidateReplayLatencyMs": 1,
         }
-        with patch("worker.orchestrator.verify", return_value=replay_result):
+        with patch("worker.orchestrator.verify_many", return_value=[replay_result] * 3):
             result = verify_candidates({
                 "id": 1,
                 "before": {},
@@ -67,6 +71,35 @@ class OrchestratorTests(unittest.TestCase):
                 "resolvedTokens": list("lllll"),
             }, candidates)
         self.assertEqual(result[0]["compiledTokens"], ["$"])
+
+    def test_unseen_feature_ranks_before_previous_exposure(self):
+        candidates = [
+            {
+                "tokens": [{"kind": "move", "key": key}],
+                "compiledTokens": [key],
+                "concept": key,
+                "explanation": "",
+            }
+            for key in ("w", "e")
+        ]
+        replay_result = {
+            "accepted": True,
+            "originalReplayMatches": True,
+            "candidateReplayMatches": True,
+            "originalLogicalKeys": 5,
+            "candidateLogicalKeys": 1,
+            "savedLogicalKeys": 4,
+            "originalReplayLatencyMs": 1,
+            "candidateReplayLatencyMs": 1,
+        }
+        with patch("worker.orchestrator.verify_many", return_value=[replay_result] * 2):
+            result = verify_candidates({
+                "before": {},
+                "after": {},
+                "resolvedTokens": list("lllll"),
+            }, candidates, lesson_profile={"w": {"exposures": 2}})
+        self.assertEqual(result[0]["compiledTokens"], ["e"])
+        self.assertNotIn(["w"], [item["compiledTokens"] for item in result])
 
     def test_neovim_server_socket_is_not_used_as_the_replay_executable(self):
         with patch.dict(os.environ, {"NVIM": "/tmp/nvim.socket"}, clear=True):

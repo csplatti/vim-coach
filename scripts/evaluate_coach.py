@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -72,10 +73,24 @@ def make_episode(identifier: int, scenario: tuple[Any, ...]) -> dict[str, Any]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="evaluate catalog generation without making a provider request",
+    )
+    args = parser.parse_args()
     load_env_file(ROOT / ".env")
     episodes = [make_episode(index, scenario) for index, scenario in enumerate(SCENARIOS, 1)]
-    client = LLMClient(LLMConfig.from_env(cloud_enabled=True))
-    proposed = client.propose_batch(episodes, [])
+    if args.local_only:
+        proposed = {
+            "model": "local-catalog",
+            "suggestions": [],
+            "providerReturnedContent": False,
+        }
+    else:
+        client = LLMClient(LLMConfig.from_env(cloud_enabled=True))
+        proposed = client.propose_batch(episodes, [])
     diagnostics: list[dict[str, Any]] = []
     candidates_to_verify = augment_local_candidates(episodes, proposed["suggestions"])
     verified = add_help_lessons(

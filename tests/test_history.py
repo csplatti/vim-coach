@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from worker.history import append_verified_lessons, related_lessons, reset_lesson_statuses, update_lesson_status
+from worker.history import append_verified_lessons, lesson_profile, related_lessons, reset_lesson_statuses, update_lesson_status
 
 
 class HistoryTests(unittest.TestCase):
@@ -14,7 +14,9 @@ class HistoryTests(unittest.TestCase):
                 "episodeId": 5,
                 "candidates": [{
                     "tokens": [{"kind": "move", "key": "w"}],
+                    "originalTokens": ["w", "w", "w"],
                     "compiledTokens": ["w"],
+                    "_featureKey": "w",
                     "concept": "word-motion",
                     "explanation": "Move by word.",
                     "originalLogicalKeys": 3,
@@ -27,6 +29,7 @@ class HistoryTests(unittest.TestCase):
             value = json.loads(path.read_text())
             self.assertEqual(value["schemaVersion"], 1)
             self.assertEqual(value["lessons"][0]["episodeId"], 5)
+            self.assertEqual(value["lessons"][0]["originalTokens"], ["w", "w", "w"])
             self.assertNotIn("before", value["lessons"][0])
             self.assertNotIn("after", value["lessons"][0])
             self.assertEqual(value["lessons"][0]["status"], "new")
@@ -39,6 +42,9 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(context[0]["concept"], "word-motion")
             self.assertIn("helpTag", context[0])
             self.assertNotIn("before", context[0])
+            profile = lesson_profile(path)
+            self.assertEqual(profile["w"]["exposures"], 1)
+            self.assertFalse(profile["w"]["known"])
 
     def test_does_not_persist_duplicate_help_tag(self):
         with tempfile.TemporaryDirectory() as directory:

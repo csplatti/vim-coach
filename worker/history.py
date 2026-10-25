@@ -75,10 +75,12 @@ def append_verified_lessons(
                 "model": model,
                 "createdAt": timestamp,
                 "tokens": candidate.get("tokens", []),
+                "originalTokens": candidate.get("originalTokens", []),
                 "compiledTokens": candidate.get("compiledTokens", []),
                 "concept": candidate.get("concept", ""),
                 "explanation": candidate.get("explanation", ""),
                 "helpTag": candidate.get("helpTag"),
+                "featureKey": candidate.get("_featureKey"),
                 "documentationSource": candidate.get("documentationSource"),
                 "originalLogicalKeys": candidate.get("originalLogicalKeys"),
                 "candidateLogicalKeys": candidate.get("candidateLogicalKeys"),
@@ -159,3 +161,28 @@ def related_lessons(
         }))
     scored.sort(key=lambda item: (-item[0], -item[1]))
     return [item[2] for item in scored[:limit]]
+
+
+def lesson_profile(path: Path) -> dict[str, dict[str, Any]]:
+    """Summarize prior feature exposure without retaining source snapshots."""
+    help_aliases = {"d": "dw", "iw": "diw", "aw": "daw"}
+    profile: dict[str, dict[str, Any]] = {}
+    for lesson in _read(path):
+        feature = lesson.get("featureKey")
+        if not isinstance(feature, str) or not feature:
+            help_tag = lesson.get("helpTag")
+            feature = help_aliases.get(help_tag, help_tag) if isinstance(help_tag, str) else None
+        if not isinstance(feature, str) or not feature:
+            continue
+        item = profile.setdefault(feature, {
+            "exposures": 0,
+            "known": False,
+            "dismissals": 0,
+        })
+        item["exposures"] += 1
+        status = lesson.get("status", "new")
+        if status == "known":
+            item["known"] = True
+        elif status == "dismissed":
+            item["dismissals"] += 1
+    return profile

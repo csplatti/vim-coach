@@ -17,7 +17,7 @@ if Path("/private/tmp").is_dir():
 
 from worker.provider import LLMClient, LLMError, LLMConfig
 from worker.debug import append_debug_event
-from worker.history import append_verified_lessons, history_path, related_lessons
+from worker.history import append_verified_lessons, history_path, lesson_profile, related_lessons
 from worker.orchestrator import augment_local_candidates, verify_batch_candidates, verify_candidates
 from worker.status import write_status
 from worker.vim_help import add_help_lessons
@@ -33,9 +33,9 @@ def main() -> int:
             raise ValueError("cloud opt-in is required")
         batch_id = request.get("batchId", request.get("episodeId"))
         _safe_status("running", batch_id, episodeCount=len(request.get("episodes", [])))
-        config = LLMConfig.from_env(cloud_enabled=True)
-        client = LLMClient(config)
         if request.get("schemaVersion") == 1:
+            config = LLMConfig.from_env(cloud_enabled=True)
+            client = LLMClient(config)
             episode = request.get("episode")
             if not isinstance(episode, dict):
                 raise ValueError("episode must be an object")
@@ -47,7 +47,21 @@ def main() -> int:
             episodes = request.get("episodes")
             if not isinstance(episodes, list) or not episodes:
                 raise ValueError("episodes must be a non-empty array")
-            result = client.propose_batch(episodes, related_lessons(history_path(), episodes))
+            path = history_path()
+            provider_warning = None
+            try:
+                config = LLMConfig.from_env(cloud_enabled=True)
+                client = LLMClient(config)
+                result = client.propose_batch(episodes, related_lessons(path, episodes))
+            except LLMError as error:
+                # Catalog generation and replay are useful even if a provider is
+                # unavailable. Keep the batch moving and report the degradation.
+                provider_warning = str(error)
+                result = {
+                    "model": "local-catalog",
+                    "suggestions": [],
+                    "providerReturnedContent": False,
+                }
             provider_candidates = sum(
                 len(suggestion.get("candidates", []))
                 for suggestion in result["suggestions"]
@@ -62,6 +76,7 @@ def main() -> int:
                 episodes,
                 candidates_to_verify,
                 replay_rejections,
+                lesson_profile(path),
             )
             verified_suggestions = add_help_lessons(verified_suggestions)
             verified_candidates = sum(
@@ -70,7 +85,7 @@ def main() -> int:
             )
             history_warning = None
             try:
-                persisted = append_verified_lessons(history_path(), verified_suggestions, result["model"])
+                persisted = append_verified_lessons(path, verified_suggestions, result["model"])
             except OSError as error:
                 persisted = 0
                 history_warning = f"could not persist lesson history: {error}"
@@ -88,6 +103,8 @@ def main() -> int:
             }
             if history_warning:
                 output["historyWarning"] = history_warning
+            if provider_warning:
+                output["providerWarning"] = provider_warning
             _safe_status(
                 "completed",
                 batch_id,
@@ -97,6 +114,7 @@ def main() -> int:
                 localCandidateCount=local_candidates,
                 verifiedCandidateCount=verified_candidates,
                 replayRejections=replay_rejections,
+                providerWarning=provider_warning,
             )
             if os.environ.get("VIM_COACH_DEBUG_PROMPT") == "1":
                 append_debug_event(

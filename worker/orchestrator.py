@@ -1,223 +1,193 @@
-"""Local orchestration from provider candidates to verified suggestions."""
+"""Local orchestration from catalog/provider candidates to verified lessons."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from replay.verify import verify
-
-
-SEMANTIC_MOTIONS = ("w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%")
-COUNTABLE_MOTIONS = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E"}
-LOCAL_MOTION_PRIORITY = {
-    "%": 90,
-    "gg": 85,
-    "G": 85,
-    "$": 80,
-    "^": 80,
-    "0": 75,
-    "W": 65,
-    "B": 65,
-    "E": 65,
-    "ge": 65,
-    "w": 50,
-    "b": 50,
-    "e": 50,
-}
-
-
-def _token_objects(compiled: list[str]) -> list[dict[str, Any]]:
-    tokens: list[dict[str, Any]] = []
-    index = 0
-    while index < len(compiled):
-        if compiled[index].isdigit() and compiled[index] != "0":
-            digits = []
-            while index < len(compiled) and compiled[index].isdigit():
-                digits.append(compiled[index])
-                index += 1
-            tokens.append({"kind": "count", "value": int("".join(digits))})
-            continue
-        value = compiled[index]
-        if value == "g" and index + 1 < len(compiled) and compiled[index + 1] in {"g", "e"}:
-            tokens.append({"kind": "move", "key": value + compiled[index + 1]})
-            index += 2
-            continue
-        if value in {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G", "0", "^", "$", "%"}:
-            tokens.append({"kind": "move", "key": value})
-            index += 1
-            continue
-        if value in {"x", "D"}:
-            tokens.append({"kind": "delete", "command": value})
-            index += 1
-            continue
-        command = "".join(compiled[index:index + 3])
-        if command in {"diw", "daw"}:
-            tokens.append({"kind": "delete", "command": command})
-            index += 3
-            continue
-        command = "".join(compiled[index:index + 2])
-        if command in {"dd", "dw"}:
-            tokens.append({"kind": "delete", "command": command})
-            index += 2
-            continue
-        return []
-    return tokens
-
-
-def _compressed_motion_candidate(original: list[str]) -> list[str] | None:
-    compressed: list[str] = []
-    changed = False
-    index = 0
-    while index < len(original):
-        token = original[index]
-        end = index + 1
-        while end < len(original) and original[end] == token:
-            end += 1
-        count = end - index
-        if token in COUNTABLE_MOTIONS and count >= 3:
-            replacement = [*str(count), token]
-            if len(replacement) < count:
-                compressed.extend(replacement)
-                changed = True
-            else:
-                compressed.extend(original[index:end])
-        else:
-            compressed.extend(original[index:end])
-        index = end
-    return compressed if changed and len(compressed) < len(original) else None
+from replay.verify import verify_many
+from worker.candidates import FEATURE_PRIORITY, merge_candidates
 
 
 def augment_local_candidates(
     episodes: list[dict[str, Any]], suggestions: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Add bounded local possibilities; replay still decides equivalence."""
-    by_id = {
-        suggestion.get("episodeId"): {
-            **suggestion,
-            "candidates": list(suggestion.get("candidates", [])),
-        }
-        for suggestion in suggestions
+    """Compatibility wrapper for the catalog-driven candidate generator."""
+    return merge_candidates(episodes, suggestions)
+
+
+def _candidate_feature(candidate: dict[str, Any]) -> str:
+    explicit = candidate.get("_featureKey")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    tokens = candidate.get("tokens", [])
+    if any(isinstance(token, dict) and token.get("kind") == "count" for token in tokens):
+        return "count"
+    for kind, field in (("move", "key"), ("delete", "command")):
+        for token in tokens:
+            if isinstance(token, dict) and token.get("kind") == kind:
+                value = token.get(field)
+                if isinstance(value, str):
+                    return value
+    return ""
+
+
+def _verification_payload(episode: dict[str, Any], token_sets: list[list[str]]) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "before": episode["before"],
+        "after": episode["after"],
+        "originalTokens": episode["resolvedTokens"],
+        "candidateTokenSets": token_sets,
+        # Coaching compares the visible editing outcome. Register differences
+        # are still measured and disclosed, but do not hide idiomatic commands
+        # such as D or diw when they replace repeated x presses.
+        "requireRegisterEquality": False,
     }
-    for episode in episodes:
-        suggestion = by_id.setdefault(episode.get("id"), {
-            "episodeId": episode.get("id"),
-            "candidates": [],
-        })
-        existing = {
-            tuple(candidate.get("compiledTokens", []))
-            for candidate in suggestion["candidates"]
-        }
-        if episode.get("kind") == "navigation":
-            for key in SEMANTIC_MOTIONS:
-                compiled_key = tuple(key)
-                if compiled_key in existing:
-                    continue
-                suggestion["candidates"].append({
-                    "tokens": [{"kind": "move", "key": key}],
-                    "compiledTokens": list(key),
-                    "concept": key,
-                    "explanation": "",
-                    "_rankingPriority": LOCAL_MOTION_PRIORITY[key],
-                })
-        compressed = _compressed_motion_candidate(episode.get("resolvedTokens", []))
-        if compressed and tuple(compressed) not in existing:
-            suggestion["candidates"].append({
-                "tokens": _token_objects(compressed),
-                "compiledTokens": compressed,
-                "concept": "count",
-                "explanation": "",
-                "_rankingPriority": 10,
-            })
-    return list(by_id.values())
+
+
+def _repair_positioning_prefix(
+    episode: dict[str, Any], candidate: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any] | None:
+    original = episode.get("resolvedTokens", [])
+    compiled = candidate.get("compiledTokens", [])
+    if result.get("accepted") or not original or original[0] not in {"0", "^", "$"}:
+        return None
+    if compiled and compiled[0] == original[0]:
+        return None
+    repaired = [original[0], *compiled]
+    if len(repaired) >= len(original):
+        return None
+    return {
+        **candidate,
+        "tokens": [{"kind": "move", "key": original[0]}, *candidate.get("tokens", [])],
+        "compiledTokens": repaired,
+        "_origin": "position-prefix-repair",
+    }
+
+
+def _verified_candidate(
+    episode: dict[str, Any], candidate: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any]:
+    feature = _candidate_feature(candidate)
+    return {
+        **candidate,
+        "_featureKey": feature,
+        "_rankingPriority": candidate.get("_rankingPriority", FEATURE_PRIORITY.get(feature, 0)),
+        "verified": True,
+        "originalTokens": episode["resolvedTokens"],
+        "originalLogicalKeys": result["originalLogicalKeys"],
+        "candidateLogicalKeys": result["candidateLogicalKeys"],
+        "savedLogicalKeys": result["savedLogicalKeys"],
+        "verification": {
+            "accepted": True,
+            "originalReplayMatches": result["originalReplayMatches"],
+            "candidateReplayMatches": result["candidateReplayMatches"],
+            "textEqual": True,
+            "cursorEqual": True,
+            "modeEqual": True,
+            "registersEqual": result.get("registersEqual", False),
+            "comparisonPolicy": result.get("comparisonPolicy", "editing-outcome"),
+            "profileId": episode.get("before", {}).get("profileId"),
+            "replayLatencyMs": result["originalReplayLatencyMs"] + result["candidateReplayLatencyMs"],
+        },
+    }
+
+
+def _record_rejection(
+    diagnostics: list[dict[str, Any]] | None,
+    episode: dict[str, Any],
+    candidate: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    if diagnostics is None:
+        return
+    diagnostics.append({
+        "episodeId": episode.get("id"),
+        "candidateTokens": candidate.get("compiledTokens", []),
+        "origin": candidate.get("_origin", "provider"),
+        "reason": result.get("rejectionReason", "replay rejected candidate"),
+        "originalMismatchFields": result.get("originalMismatchFields", []),
+        "candidateMismatchFields": result.get("candidateMismatchFields", []),
+    })
 
 
 def verify_candidates(
     episode: dict[str, Any],
     candidates: list[dict[str, Any]],
     diagnostics: list[dict[str, Any]] | None = None,
+    lesson_profile: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    verified: list[dict[str, Any]] = []
+    """Replay candidates, deduplicate them, and apply curriculum-aware ranking."""
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
     for candidate in candidates:
-        candidate_to_verify = candidate
-        try:
-            result = verify({
-                "schemaVersion": 1,
-                "before": episode["before"],
-                "after": episode["after"],
-                "originalTokens": episode["resolvedTokens"],
-                "candidateTokens": candidate_to_verify["compiledTokens"],
-            })
+        identity = tuple(candidate.get("compiledTokens", []))
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(candidate)
+    if not unique:
+        return []
 
-            # Reasoning models sometimes describe counted motion from column 0
-            # but omit the original leading positioning command. Try restoring
-            # that one safe prefix; replay remains the authority on equivalence.
-            original_tokens = episode["resolvedTokens"]
-            candidate_tokens = candidate_to_verify["compiledTokens"]
-            if (
-                not result.get("accepted")
-                and original_tokens
-                and original_tokens[0] in {"0", "^", "$"}
-                and (not candidate_tokens or candidate_tokens[0] != original_tokens[0])
-            ):
-                repaired_tokens = [original_tokens[0], *candidate_tokens]
-                if len(repaired_tokens) < len(original_tokens):
-                    repaired_result = verify({
-                        "schemaVersion": 1,
-                        "before": episode["before"],
-                        "after": episode["after"],
-                        "originalTokens": original_tokens,
-                        "candidateTokens": repaired_tokens,
-                    })
-                    if repaired_result.get("accepted"):
-                        candidate_to_verify = {
-                            **candidate_to_verify,
-                            "tokens": [
-                                {"kind": "move", "key": original_tokens[0]},
-                                *candidate_to_verify.get("tokens", []),
-                            ],
-                            "compiledTokens": repaired_tokens,
-                        }
-                        result = repaired_result
-        except (KeyError, TypeError, ValueError, RuntimeError) as error:
-            if diagnostics is not None:
-                diagnostics.append({
-                    "episodeId": episode.get("id"),
-                    "candidateTokens": candidate.get("compiledTokens", []),
-                    "reason": f"replay error: {error}",
-                })
+    try:
+        results = verify_many(_verification_payload(
+            episode,
+            [candidate["compiledTokens"] for candidate in unique],
+        ))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        if diagnostics is not None:
+            diagnostics.append({
+                "episodeId": episode.get("id"),
+                "candidateTokens": [],
+                "reason": f"replay error: {error}",
+            })
+        return []
+
+    verified: list[dict[str, Any]] = []
+    repairs: list[dict[str, Any]] = []
+    rejected: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for candidate, result in zip(unique, results):
+        if result.get("accepted"):
+            verified.append(_verified_candidate(episode, candidate, result))
             continue
-        if not result.get("accepted"):
-            if diagnostics is not None:
-                diagnostics.append({
-                    "episodeId": episode.get("id"),
-                    "candidateTokens": candidate.get("compiledTokens", []),
-                    "reason": result.get("rejectionReason", "replay rejected candidate"),
-                    "originalMismatchFields": result.get("originalMismatchFields", []),
-                    "candidateMismatchFields": result.get("candidateMismatchFields", []),
-                })
-            continue
-        verified.append({
-            **candidate_to_verify,
-            "verified": True,
-            "originalTokens": episode["resolvedTokens"],
-            "originalLogicalKeys": result["originalLogicalKeys"],
-            "candidateLogicalKeys": result["candidateLogicalKeys"],
-            "savedLogicalKeys": result["savedLogicalKeys"],
-            "verification": {
-                "accepted": True,
-                "originalReplayMatches": result["originalReplayMatches"],
-                "candidateReplayMatches": result["candidateReplayMatches"],
-                "textEqual": True,
-                "cursorEqual": True,
-                "modeEqual": True,
-                "registersEqual": True,
-                "profileId": episode.get("before", {}).get("profileId"),
-                "replayLatencyMs": result["originalReplayLatencyMs"] + result["candidateReplayLatencyMs"],
-            },
-        })
+        repair = _repair_positioning_prefix(episode, candidate, result)
+        if repair is not None and tuple(repair["compiledTokens"]) not in seen:
+            seen.add(tuple(repair["compiledTokens"]))
+            repairs.append(repair)
+        rejected.append((candidate, result))
+
+    repaired_identities: set[tuple[str, ...]] = set()
+    if repairs:
+        try:
+            repair_results = verify_many(_verification_payload(
+                episode,
+                [candidate["compiledTokens"] for candidate in repairs],
+            ))
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            repair_results = []
+        for candidate, result in zip(repairs, repair_results):
+            if result.get("accepted"):
+                verified.append(_verified_candidate(episode, candidate, result))
+                repaired_identities.add(tuple(candidate["compiledTokens"][1:]))
+            else:
+                _record_rejection(diagnostics, episode, candidate, result)
+
+    for candidate, result in rejected:
+        if tuple(candidate.get("compiledTokens", [])) not in repaired_identities:
+            _record_rejection(diagnostics, episode, candidate, result)
+
+    profile = lesson_profile or {}
+    if lesson_profile is not None:
+        # A review card introduces a feature once. "I know" and dismissal are
+        # represented in the same exposure history, so neither can reappear as
+        # another duplicate lesson.
+        verified = [
+            item for item in verified
+            if int(profile.get(_candidate_feature(item), {}).get("exposures", 0)) == 0
+        ]
     verified.sort(key=lambda item: (
         -item["savedLogicalKeys"],
-        -item.get("_rankingPriority", 100),
+        -item.get("_rankingPriority", 0),
         item["candidateLogicalKeys"],
     ))
     return verified[:3]
@@ -227,6 +197,7 @@ def verify_batch_candidates(
     episodes: list[dict[str, Any]],
     suggestions: list[dict[str, Any]],
     diagnostics: list[dict[str, Any]] | None = None,
+    lesson_profile: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     by_id = {episode.get("id"): episode for episode in episodes}
     verified: list[dict[str, Any]] = []
@@ -240,6 +211,7 @@ def verify_batch_candidates(
                 episode,
                 suggestion.get("candidates", []),
                 diagnostics,
+                lesson_profile,
             ),
         })
     return verified

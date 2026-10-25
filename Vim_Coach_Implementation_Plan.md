@@ -42,6 +42,28 @@ retain them in memory until replay and practice finish.
 This replaces the earlier inline-card requirement below. The existing card is
 useful as a prototype fixture but is not the target user experience.
 
+### Improved recommendation architecture
+
+Do not make model recall the coverage boundary. Generate a bounded candidate
+set locally from the supported Vim feature catalog, merge it with optional
+model proposals, and send both through the same replay verifier. Local
+generation covers semantic motions, counts, deletion commands, common
+motion-plus-action combinations, and anchored edits; it never marks its own
+candidate correct.
+
+Replay the captured original once per episode, then compare each candidate
+against that baseline. Coaching uses an explicit editing-outcome policy: text,
+cursor, final newline, and mode must match. Register differences remain in the
+verification record but do not reject an otherwise useful lesson. This is
+weaker than full-state equivalence and must be labeled as such.
+
+Use persisted lesson metadata as a small curriculum profile. Suppress repeated,
+dismissed, and known concepts; rank the remaining features by keys saved,
+feature usefulness, and simplicity. A provider failure should produce a warning and fall back to local
+catalog candidates instead of discarding the whole batch. The model remains a
+source of contextual proposals, not the parser, verifier, documentation source,
+or sole source of feature discovery.
+
 **Done means:** automatic capture works on three real supported edits; a shorter candidate is verified; an incorrect or unsafe proposal is rejected; one drill works without touching the source file; a real Modal response drives the experience; and another person can reproduce the demo from the README. Do not promise universal Vim equivalence, physical keystroke measurement, improved typing speed, novelty, or a prize.
 
 ## 2 What the user sees
@@ -56,7 +78,7 @@ useful as a prototype fixture but is not the target user experience.
 
 Example wording, with counts filled from actual results:
 
-> Try this shorter sequence. Same captured buffer, cursor, Normal mode, and tracked register state in replay. 9 → 4 logical Vim keys. Practice this edit?
+> Try this shorter sequence. Same captured buffer, cursor, and Normal mode in replay. Register effects differ. 9 → 4 logical Vim keys. Practice this edit?
 
 Only claim the states actually compared. A replay proves this concrete example under a defined profile, not equivalent behavior in every file or editor configuration.
 
@@ -241,12 +263,17 @@ Capture complete text, final-newline state, cursor, Normal-mode boundaries, and 
 Replay the **original and candidate separately**, each from a fresh identical before-state:
 
 1. Original must reproduce the captured target; otherwise the episode is unsupported or capture is incomplete.
-2. Candidate must reproduce the target buffer, cursor, mode, and tracked register state.
+2. Candidate must reproduce the target buffer, cursor, final-newline state, and mode. Compare tracked registers too, but under the coaching policy report differences rather than rejecting the visible editing outcome.
 3. Candidate’s compiler-computed logical-key count must be strictly lower before calling it shorter.
 
-Comparing register state is stricter than text-only comparison and will reject some attractive shortcuts: repeated single-character deletions can leave different registers from one counted deletion. That is a correctness feature. Begin with navigation improvements followed by the same deletion operation; derive exact passing examples from real runs.
-
-If a simpler text-and-cursor-only comparison is necessary, label it **same buffer and cursor outcome**, explicitly show that register effects were not compared, and do not call it full state equivalence. Never silently weaken the guarantee. Undo history, dot-repeat, marks, jump lists, viewport, and future behavior are outside this prototype’s claim even under the stricter profile.
+The verifier supports two explicit policies. Standalone verification defaults to
+`full-state`, where register differences reject a candidate. The coach uses
+`editing-outcome`, where register equality is recorded but only buffer,
+final-newline, cursor, and mode determine acceptance. This permits useful
+lessons such as replacing repeated `x` with `D` or `diw` while making the
+weaker guarantee visible. Never call an editing-outcome result full-state
+equivalence. Undo history, dot-repeat, marks, jump lists, viewport, and future
+behavior remain outside both prototype claims.
 
 ### A bounded grammar is the safety boundary
 
@@ -330,7 +357,7 @@ Suggested rhythm: build until about 12:30 AM, sleep until about 5:30 AM, then QA
 Fixtures contain start/target text, final-newline state, cursor/mode/registers/options, original tokens, candidate tokens, and expected verdict. Generate targets from real editor runs. The examples in this plan are test ideas, not already executed results.
 
 - **Positive:** redundant horizontal/word navigation followed by the same delete operation; a line-end deletion; a counted movement improvement. Add word replacement only after safe literal handling works.
-- **Mismatch:** wrong word, same text with wrong cursor, wrong final mode, or different tracked register effects.
+- **Mismatch:** wrong word, same text with wrong cursor, or wrong final mode. Test register differences as a rejection under `full-state` and a disclosed difference under `editing-outcome`.
 - **Capture:** idle boundaries, typeahead, incomplete count/operator, Escape, callback exception, buffer/window/focus changes, macro/remap/paste/IME rejection, plugin edits.
 - **Encoding:** tabs, empty buffer, trailing newline, final line, CRLF policy, non-ASCII rejected until byte/token handling is tested.
 - **Hostile proposals:** Ex/shell commands, macros, expression registers, invalid token placement, oversized arrays, control bytes, malformed JSON, and prompt-injection comments.
@@ -356,7 +383,7 @@ Final checklist:
 
 - [ ] Native plugin loads from a fresh checkout with documented versions/configuration.
 - [ ] Automatic recording is real; unsupported input is rejected visibly or safely skipped.
-- [ ] Tests pass, including original replay, unsafe proposals, and register mismatches.
+- [ ] Tests pass, including original replay, unsafe proposals, and both register-comparison policies.
 - [ ] README documents the grammar, privacy, setup, limits, and all commands.
 - [ ] Real Modal usage is demonstrated without exposing a key or private code.
 - [ ] Repository preserves licenses and attribution and contains no secrets.

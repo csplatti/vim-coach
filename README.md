@@ -21,6 +21,14 @@ bounded deletion forms `x`, `D`, `dd`, `dw`, `diw`, and `daw`. The installed
 Neovim runtime has thousands of help tags, so this catalog is intentionally a
 safe subset rather than a claim of full Vim coverage.
 
+Recommendation discovery is hybrid. A local catalog generator creates bounded
+programs from those features, the model may add contextual candidates, and
+replay validates both sources identically. Modal failure no longer fails the
+batch: local catalog candidates are still verified and persisted, with the
+provider error returned as a warning. Lesson history is used as a small skill
+profile so concepts already introduced, dismissed, or marked known are not
+emitted as duplicate lessons.
+
 ## Development baseline
 
 The current development machine has:
@@ -60,8 +68,14 @@ To see capture status without source text:
 Step 3 adds a standalone deterministic verifier. It launches a fresh headless
 Neovim child for the original and candidate token arrays, then compares the
 resulting buffer, final-newline state, cursor, Normal mode, and tracked
-registers. The candidate is accepted only when both replays match the target
-and the candidate uses fewer logical tokens.
+registers. A batch replays the original sequence once per episode and reuses
+that baseline for every candidate.
+
+The standalone verifier defaults to strict register equality. Coaching uses an
+explicit `editing-outcome` policy: text, cursor, final mode, and final-newline
+state must match, while register differences are measured and disclosed rather
+than rejecting idiomatic replacements such as `D` for repeated `x`. Lessons
+must not describe these as full Vim-state equivalence.
 
 The verifier accepts a JSON payload containing `before`, `after`,
 `originalTokens`, and `candidateTokens`:
@@ -142,8 +156,11 @@ concise excerpt from the installed Neovim runtime documentation, an example
 binding, and the corresponding `:help` tag. AI prose is discarded before the
 lesson is persisted, so lessons do not critique or narrate the user's edit.
 The installed help catalog is also included in model context. For navigation,
-the worker supplements model proposals with safe one-key semantic motions and
-accepts them only when local replay proves exact cursor and text equivalence.
+the worker supplements model proposals with bounded candidates from the whole
+supported feature catalog, including semantic motions, counts, delete forms,
+motion-plus-delete sequences, and anchored edits. It accepts them only when
+local replay proves the configured editing outcome. The model remains useful
+for contextual proposals, but ordinary catalog coverage does not depend on it.
 Raw before/after buffer snapshots are not persisted by default.
 
 Use `:VimCoachLesson` to see how many lessons are ready. Neovim does not yet
@@ -189,6 +206,16 @@ python3 scripts/evaluate_coach.py
 
 This makes one provider batch request and reports proposed, verified, rejected,
 and expected bindings for each scenario.
+
+To measure deterministic catalog coverage without a provider request:
+
+```sh
+python3 scripts/evaluate_coach.py --local-only
+```
+
+The checked-in 21-scenario corpus currently verifies all 21 expected targets
+under the coaching outcome policy. This is curated grammar coverage, not a
+claim about all of Vim.
 
 To diagnose the Modal/provider endpoint without printing the API key, run:
 
