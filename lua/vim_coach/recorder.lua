@@ -99,4 +99,8 @@ function M.status()
   }
 end
 
+function M.last_episode()
+  return episodes.last_episode()
+end
+
 return M

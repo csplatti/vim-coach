@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-x86/
+.env
+.env.*
+!.env.example
+.nvimlog

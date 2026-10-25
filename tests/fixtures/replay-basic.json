@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "before": {
+    "lines": ["one two three four"],
+    "finalNewline": true,
+    "cursor": {
+      "row1Based": 1,
+      "byteColumn0Based": 0
+    },
+    "trackedRegisters": {}
+  },
+  "after": {
+    "lines": ["one two three our"],
+    "finalNewline": true,
+    "cursor": {
+      "row1Based": 1,
+      "byteColumn0Based": 14
+    },
+    "mode": "n",
+    "trackedRegisters": {
+      "\"": {
+        "contents": ["f"],
+        "type": "v"
+      },
+      "-": {
+        "contents": ["f"],
+        "type": "v"
+      },
+      "1": {
+        "contents": [],
+        "type": ""
+      },
+      "2": {
+        "contents": [],
+        "type": ""
+      },
+      "3": {
+        "contents": [],
+        "type": ""
+      },
+      "4": {
+        "contents": [],
+        "type": ""
+      },
+      "5": {
+        "contents": [],
+        "type": ""
+      },
+      "6": {
+        "contents": [],
+        "type": ""
+      },
+      "7": {
+        "contents": [],
+        "type": ""
+      },
+      "8": {
+        "contents": [],
+        "type": ""
+      },
+      "9": {
+        "contents": [],
+        "type": ""
+      }
+    }
+  },
+  "originalTokens": ["w", "w", "w", "x"],
+  "candidateTokens": ["3", "w", "x"]
+}
