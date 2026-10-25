@@ -1,6 +1,6 @@
 """Small local JSON history for verified lesson metadata.
 
-Raw buffer snapshots are intentionally not written here. The review app can
+Raw buffer snapshots are intentionally not written here. Neovim can
 use this metadata for its inbox, while practice examples remain an explicit
 future opt-in.
 """

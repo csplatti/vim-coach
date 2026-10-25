@@ -7,6 +7,7 @@ local queue = require("vim_coach.queue")
 local progress = require("vim_coach.progress")
 local goals = require("vim_coach.goals")
 local stats = require("vim_coach.stats")
+local help = require("vim_coach.help")
 
 local defaults = {
   enabled = true,
@@ -64,7 +65,7 @@ function M.setup(opts)
       lessons = lessons + #(suggestion.candidates or {})
     end
     if lessons > 0 then
-      notify(string.format("batch complete; %d verified lesson%s ready in the review app", lessons, lessons == 1 and " is" or "s are"))
+      notify(string.format("batch complete; %d verified lesson%s ready", lessons, lessons == 1 and " is" or "s are"))
     elseif result.providerReturnedContent == false then
       notify("batch complete; provider emitted no final JSON", vim.log.levels.WARN)
     elseif (result.providerCandidateCount or 0) == 0 then
@@ -167,7 +168,7 @@ end
 
 function M.lesson()
   local count = queue.status().lessons
-  notify(string.format("%d verified lesson%s ready; the separate review app is not connected yet", count, count == 1 and " is" or "s are"))
+  notify(string.format("%d verified lesson%s ready; use :VimCoachGoals to track practice", count, count == 1 and " is" or "s are"))
 end
 
 function M.show_suggestion(proposal)
@@ -266,6 +267,10 @@ function M.stats()
   stats.open()
 end
 
+function M.help()
+  help.open()
+end
+
 function M.reset_data()
   worker.cancel()
   state.active_batch = nil
@@ -274,6 +279,34 @@ function M.reset_data()
   ui.reset()
   practice.close()
   notify("local in-memory episode data cleared")
+end
+
+function M.reset_profile(force)
+  if not force then
+    local choice = vim.fn.confirm(
+      "Reset all Vim Coach lessons, goals, and progress? This cannot be undone.",
+      "&Reset\n&Cancel",
+      2
+    )
+    if choice ~= 1 then
+      notify("profile reset cancelled")
+      return false
+    end
+  end
+
+  worker.cancel()
+  state.active_batch = nil
+  recorder.reset()
+  queue.clear()
+  ui.reset()
+  practice.close()
+  local ok, reason = progress.reset_profile()
+  if not ok then
+    notify("profile reset failed: " .. tostring(reason), vim.log.levels.ERROR)
+    return false
+  end
+  notify("profile reset; lessons, goals, and progress cleared")
+  return true
 end
 
 return M

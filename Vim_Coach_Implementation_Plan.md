@@ -20,17 +20,17 @@ The product direction has changed after testing the live loop. Do not interrupt
 editing with an immediate model request or inline suggestion card. The desired
 loop is:
 
-**Edit normally → queue bounded episodes locally → send a batch to the model → replay-verify candidates → review lessons in a separate app → practice later.**
+**Edit normally → queue bounded episodes locally → send a batch to the model → replay-verify candidates → review goals in Neovim → practice later.**
 
 Neovim remains a quiet recorder and status surface. It may show a pending
 lesson count, but it should not open a suggestion card after each edit. The
 model remains responsible for proposing and explaining techniques; local
 parsing and replay remain the correctness boundary.
 
-The separate review app should begin as a local Electron inbox backed by a
-JSON or SQLite state directory. It should support Review, Practice, Dismiss, I
-Know, and Reset. No public backend, account system, or vector database is
-needed for the first batch-review version.
+The native Neovim interface is backed by a local JSON state directory. It
+supports lesson counts, goals, statistics, Practice, Dismiss, I Know, and
+Reset. No public backend, account system, or vector database is needed for the
+first batch-review version.
 
 The model request should contain multiple episode IDs and minimized examples.
 The response must identify each episode, contain bounded candidate proposals,
@@ -74,7 +74,7 @@ or sole source of feature discovery.
 4. A local eligibility check and original-sequence replay establish that the captured inputs explain the captured change. Eligible episodes enter the local batch queue.
 5. If no request is active, send the eligible episode immediately. While one request is active, queue new episodes and send them together as the next batch when it finishes. Validate the response, replay candidates in disposable headless Neovim processes, and reject mismatches or unsafe syntax.
 6. Persist only verified lesson metadata in the local inbox. Each lesson introduces one reusable Vim feature using a concise excerpt and help tag from the installed Neovim runtime documentation; discard AI teaching prose rather than explaining a user mistake. Show a quiet pending count in Neovim; do not open an inline suggestion card.
-7. The separate review app shows one lesson at a time. Practice opens a scratch buffer containing the original example; **Check** compares the result with the target, and **Reset** restores the start.
+7. Neovim exposes lesson counts, goals, and statistics. Practice opens a scratch buffer containing the original example; **Check** compares the result with the target, and **Reset** restores the start.
 
 Example wording, with counts filled from actual results:
 
@@ -92,7 +92,7 @@ Only claim the states actually compared. A replay proves this concrete example u
 - A small vocabulary of navigation and deletion commands, with insert/change added only after the first loop works.
 - Real Modal candidate generation; local safe parsing and deterministic replay.
 - One bounded batch queue, verified lesson records, and one scratch-buffer drill;
-  the separate review app replaces the inline card.
+  native Neovim review surfaces replace the inline card.
 - Tests, honest unsupported-state behavior, privacy controls, and reproducible demo materials.
 
 ### P1 only after P0 works
@@ -186,7 +186,7 @@ require("vim_coach").setup({
 })
 ```
 
-Expose `:VimCoachPause`, `:VimCoachResume`, `:VimCoachStatus`, `:VimCoachSync`, `:VimCoachLesson`, `:VimCoachPractice`, and `:VimCoachResetData`. Pause cancels capture and pending uploads; Resume restores recording only within the approved scope. Status reports capture health, cloud opt-in, pending batch count, verified lesson count, and the latest skip reason without source text. Lesson reports the review inbox count until the separate app is connected; Practice opens a scratch copy. ResetData clears local history and pending snapshots, with a confirmation prompt. The practice panel also needs Check and Reset controls.
+Expose `:VimCoachPause`, `:VimCoachResume`, `:VimCoachStatus`, `:VimCoachSync`, `:VimCoachLesson`, `:VimCoachGoals`, `:VimCoachStats`, `:VimCoachPractice`, and the reset commands. Pause cancels capture and pending uploads; Resume restores recording only within the approved scope. Status reports capture health, cloud opt-in, pending batch count, verified lesson count, and the latest skip reason without source text. Lesson reports the ready count, Goals and Stats show progress, and Practice opens a scratch copy. ResetData clears pending in-memory data; ResetProfile clears persisted lessons and progress after confirmation. The practice panel also provides Check and Reset controls.
 
 ## 6 State and episode boundaries
 

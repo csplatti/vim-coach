@@ -9,18 +9,23 @@ from pathlib import Path
 import sys
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(ROOT))
 
 if Path("/private/tmp").is_dir():
     os.environ["TMPDIR"] = "/private/tmp"
 
 from worker.provider import LLMClient, LLMError, LLMConfig
+from worker.env import load_env_file
 from worker.debug import append_debug_event
 from worker.history import append_verified_lessons, history_path, lesson_profile, related_lessons
 from worker.orchestrator import augment_local_candidates, verify_batch_candidates, verify_candidates
 from worker.status import write_status
 from worker.vim_help import add_help_lessons
+
+
+load_env_file(ROOT / ".env")
 
 
 def main() -> int:

@@ -28,21 +28,29 @@ local function decode_file(path)
   return value
 end
 
-local function save()
-  local directory = vim.fn.fnamemodify(state.path, ":h")
+local function write_json(path, value, error_message)
+  local directory = vim.fn.fnamemodify(path, ":h")
   vim.fn.mkdir(directory, "p")
-  local temporary = state.path .. ".tmp"
-  local encoded = vim.fn.json_encode({ schemaVersion = SCHEMA_VERSION, goals = state.goals })
+  local temporary = path .. ".tmp"
+  local encoded = vim.fn.json_encode(value)
   local ok = vim.fn.writefile({ encoded }, temporary)
   if ok ~= 0 then
-    return false, "could not write progress data"
+    return false, error_message
   end
-  local renamed = vim.loop.fs_rename(temporary, state.path)
+  local renamed = vim.loop.fs_rename(temporary, path)
   if not renamed then
     pcall(vim.fn.delete, temporary)
-    return false, "could not replace progress data"
+    return false, error_message
   end
   return true
+end
+
+local function save()
+  return write_json(
+    state.path,
+    { schemaVersion = SCHEMA_VERSION, goals = state.goals },
+    "could not write goal progress"
+  )
 end
 
 local function load()
@@ -51,6 +59,28 @@ local function load()
     state.goals = value.goals
   else
     state.goals = {}
+  end
+end
+
+local function apply_configured_target()
+  local target = tonumber(state.config.goal_target)
+  if not target or target < 1 then
+    return
+  end
+  local changed = false
+  for _, goal in ipairs(state.goals) do
+    if goal.status ~= "completed" and goal.target ~= target then
+      goal.target = target
+      changed = true
+      if (goal.progress or 0) >= target then
+        goal.progress = target
+        goal.status = "completed"
+        goal.completedAt = goal.completedAt or now()
+      end
+    end
+  end
+  if changed then
+    save()
   end
 end
 
@@ -76,6 +106,7 @@ function M.setup(config)
     or vim.env.VIM_COACH_GOALS_FILE
     or default_state_path("goals.json")
   load()
+  apply_configured_target()
   M.sync_lessons()
 end
 
@@ -159,6 +190,23 @@ end
 function M.reset()
   state.goals = {}
   save()
+end
+
+function M.reset_profile()
+  state.goals = {}
+  local goals_ok, goals_error = save()
+  if not goals_ok then
+    return false, goals_error
+  end
+  local history_ok, history_error = write_json(
+    history_path(),
+    { schemaVersion = SCHEMA_VERSION, lessons = {} },
+    "could not clear lesson history"
+  )
+  if not history_ok then
+    return false, history_error
+  end
+  return true
 end
 
 return M

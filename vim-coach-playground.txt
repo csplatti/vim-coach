@@ -68,6 +68,6 @@ time.
 One. Two.
 
 
-Vim Coach sends each completed task automatically. Open the review app to see
-which shorter techniques it found. A technique already in your lesson history
-may not appear again.
+Vim Coach sends each completed task automatically. Use :VimCoachGoals to see
+the techniques it found and track practice. A technique already in your lesson
+history may not appear again.

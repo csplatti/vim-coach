@@ -21,6 +21,7 @@ require("vim_coach").setup({
   max_episode_ms = 10000,
   min_navigation_keys = 4,
   max_candidates = 3,
+  goal_target = 10,
   provider_timeout_ms = 10000,
   replay_timeout_ms = 1000,
   -- Development only: prints captured source text and the full LLM request.

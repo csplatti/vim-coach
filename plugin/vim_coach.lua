@@ -24,6 +24,10 @@ command("VimCoachStatus", function()
   coach.status()
 end, "Show Vim Coach status")
 
+command("VimCoachHelp", function()
+  coach.help()
+end, "Show all Vim Coach commands")
+
 command("VimCoachAnalyze", function()
   coach.analyze()
 end, "Analyze the latest captured episode")
@@ -67,3 +71,10 @@ end, "Reset the Vim Coach practice buffer")
 command("VimCoachResetData", function()
   coach.reset_data()
 end, "Reset local Vim Coach data")
+
+vim.api.nvim_create_user_command("VimCoachResetProfile", function(args)
+  coach.reset_profile(args.bang)
+end, {
+  bang = true,
+  desc = "Reset persisted Vim Coach lessons, goals, and progress",
+})

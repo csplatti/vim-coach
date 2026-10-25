@@ -1,4 +1,4 @@
-"""Best-effort status file shared by the worker and local review app."""
+"""Best-effort status file for worker diagnostics."""
 
 from __future__ import annotations
 

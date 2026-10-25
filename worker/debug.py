@@ -1,4 +1,4 @@
-"""Local JSONL debug stream consumed by the Electron review process."""
+"""Local JSONL debug stream for provider diagnostics."""
 
 from __future__ import annotations
 

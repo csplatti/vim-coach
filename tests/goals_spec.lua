@@ -95,4 +95,20 @@ assert(table.concat(stat_lines, "\n"):match("1 feature learned"), "stats view om
 
 local persisted = vim.fn.json_decode(table.concat(vim.fn.readfile(goals_path), "\n"))
 assert(persisted.schemaVersion == 1 and #persisted.goals == 2, "progress was not persisted")
+
+-- Reconfiguring the demo target updates existing active goals instead of only
+-- affecting lessons created after restart.
+persisted.goals[2].target = 50
+assert(vim.fn.writefile({ vim.fn.json_encode(persisted) }, goals_path) == 0)
+progress.setup({ history_file = history_path, goals_file = goals_path, goal_target = 10 })
+local retargeted = progress.goals()
+assert(retargeted[2].target == 10, "configured target did not update an existing goal")
+
+local reset_ok, reset_error = progress.reset_profile()
+assert(reset_ok, reset_error or "profile reset failed")
+local reset_goals = vim.fn.json_decode(table.concat(vim.fn.readfile(goals_path), "\n"))
+local reset_history = vim.fn.json_decode(table.concat(vim.fn.readfile(history_path), "\n"))
+assert(reset_goals.schemaVersion == 1 and #reset_goals.goals == 0, "profile reset kept goals")
+assert(reset_history.schemaVersion == 1 and #reset_history.lessons == 0, "profile reset kept lessons")
+assert(#progress.goals() == 0, "profile reset kept in-memory goals")
 vim.fn.delete(directory, "rf")

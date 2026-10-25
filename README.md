@@ -6,7 +6,7 @@ through a scratch-buffer drill.
 
 The intended product direction is now a **batch review coach**: Neovim stays
 quiet while you work, episodes are analyzed in batches, and verified lessons
-appear in a separate review app rather than inline in the editor.
+become learning goals rather than appearing inline while you edit.
 
 The recorder captures both edits and inefficient motion-only episodes. By
 default, navigation must contain at least four supported keys and move the
@@ -59,11 +59,28 @@ and cloud analysis disabled. The recorder currently supports bounded ASCII
 Normal-mode motion and deletion episodes. It waits for the configured idle
 boundary, discards navigation-only edits, and keeps snapshots in memory.
 
+## Install in NvChad
+
+The repository is a standard local Neovim plugin. Add it to NvChad's
+`lua/custom/plugins.lua` with `dir` pointing at this checkout, set `lazy =
+false`, and call `require("vim_coach").setup(...)` from its `config` function.
+After that, ordinary `nvim` launches load Vim Coach; `-u demo/minimal.lua` is
+only needed for the isolated development profile. The worker discovers the
+plugin root automatically and loads the ignored project `.env` when present.
+
 To see capture status without source text:
 
 ```vim
 :VimCoachStatus
 ```
+
+Open the in-editor command guide at any time with:
+
+```vim
+:VimCoachHelp
+```
+
+It lists every Vim Coach command and its purpose. Press `q` to close it.
 
 ## Learning goals and stats
 
@@ -92,6 +109,16 @@ Completed goals and aggregate use counts are available with:
 Goal progress is stored atomically in
 `~/.local/state/vim-coach/goals.json`, alongside the existing lesson history.
 Set `goals_file` in `setup()` or `VIM_COACH_GOALS_FILE` to override it.
+
+Reset all persisted lessons, learning goals, and progress with:
+
+```vim
+:VimCoachResetProfile
+```
+
+The command asks for confirmation. Use `:VimCoachResetProfile!` only when an
+intentional non-interactive reset is needed. It does not change plugin settings
+or edit project files.
 
 ## Replay verifier
 
@@ -195,16 +222,10 @@ local replay proves the configured editing outcome. The model remains useful
 for contextual proposals, but ordinary catalog coverage does not depend on it.
 Raw before/after buffer snapshots are not persisted by default.
 
-Use `:VimCoachLesson` to see how many lessons are ready. Neovim does not yet
-launch or push to the review app automatically, so the old inline card remains
-only as a legacy demo fixture (`demo/suggestion.lua`) and is not used by
-automatic capture.
-
-The Electron training dashboard is in `review_app/`. From that directory, run
-`npm install` once and then `npm start`. It shares both lesson history and goal
-progress with Neovim. Challenges show live repetition progress, pause/resume
-controls, mastery stats, levels, and completed achievements; the Lessons tab
-retains review, dismiss, I Know, and reset actions.
+Use `:VimCoachLesson` to see how many lessons are ready, `:VimCoachGoals` to
+track practice, and `:VimCoachStats` to review learned features. The old inline
+card remains only as a legacy demo fixture (`demo/suggestion.lua`) and is not
+used by automatic capture.
 
 ## Practice drill
 
@@ -303,13 +324,7 @@ VIM_COACH_CLOUD=1 nvim -u demo/minimal.lua -i NONE -n
 ```
 
 Provider prompt logging remains available as an explicit backend diagnostic,
-but the demo keeps it disabled and the Electron app does not print captured
-prompts or responses to its terminal.
-
-The dashboard updates through filesystem watchers on `lessons.json` and
-`goals.json`; lesson and challenge changes are pushed to the renderer over
-Electron IPC rather than polled. Worker status remains polled for the
-short-lived loading indicator.
+but the demo keeps it disabled.
 
 ## Current limits
 
@@ -327,7 +342,7 @@ The next implementation should follow this loop:
 
 ```text
 Neovim capture → local queue → batched LLM request → replay verification
-→ persisted lesson inbox → separate review/practice app
+→ persisted lessons → native Neovim goals and practice
 ```
 
 Neovim never opens a suggestion card after an edit. It records bounded
@@ -341,12 +356,11 @@ Source snapshots should remain ephemeral by default; persisted history should co
 explanations, counts, timestamps, and verification scope unless the user
 explicitly opts into keeping practice examples.
 
-The separate app can start as an Electron review inbox backed by a local JSON
-or SQLite state directory. It should provide Review, Practice, Dismiss, I
-Know, and Reset controls. No public backend, account system, or vector database
-is required for the first version. Retrieval can begin with concept IDs,
-token-pattern matching, and recent practice history; add embeddings only if
-that simple retrieval is demonstrably insufficient.
+The native Neovim interface provides lesson counts, goals, statistics,
+practice, dismissal, and reset commands backed by local JSON state. No public
+backend, account system, or vector database is required. Retrieval can begin
+with concept IDs, token-pattern matching, and recent practice history; add
+embeddings only if that simple retrieval is demonstrably insufficient.
 
 Implementation order:
 
@@ -354,8 +368,8 @@ Implementation order:
 2. Add a batch request/response contract keyed by episode ID.
 3. Add local lesson history and retrieval without raw source by default.
 4. Preserve replay verification as the acceptance gate for every suggestion.
-5. Build the separate review app and local IPC/state protocol.
-6. Move Practice, Dismiss, I Know, and cooldown state into the review app.
+5. Build native Neovim lesson, goal, statistics, and practice views.
+6. Keep Practice, Dismiss, I Know, and reset state in the plugin.
 7. Remove or disable the inline suggestion card and measure review/practice
    completion.
 
@@ -374,4 +388,5 @@ Available commands:
 :VimCoachPracticeCheck
 :VimCoachPracticeReset
 :VimCoachResetData
+:VimCoachResetProfile
 ```

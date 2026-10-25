@@ -36,6 +36,12 @@ def main() -> int:
     run(["nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n", "+VimCoachStatus", "+qa!"])
     run([
         "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
+        "-c", "VimCoachHelp",
+        "-c", "lua assert(vim.api.nvim_buf_get_name(0):match('vim%-coach://help$'), 'help buffer did not open'); local text=table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\\n'); assert(text:match(':VimCoachResetProfile!'), 'help omitted commands')",
+        "-c", "qa!",
+    ])
+    run([
+        "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
         "-c", "enew",
         "-c", "call setline(1, ['one two three four'])",
         "-c", "normal! 2wx",

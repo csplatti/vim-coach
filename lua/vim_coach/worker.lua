@@ -7,6 +7,14 @@ local state = {
   on_result = nil,
 }
 
+local function project_root()
+  local source = debug.getinfo(1, "S").source
+  if type(source) == "string" and source:sub(1, 1) == "@" then
+    return vim.fn.fnamemodify(source:sub(2), ":p:h:h:h")
+  end
+  return vim.fn.getcwd()
+end
+
 local function finish(result, error_message)
   if state.on_result then
     state.on_result(result, error_message)
@@ -37,7 +45,7 @@ local function start_request(request)
   M.cancel()
   local generation = state.generation
   local command = state.config.worker_command or { "python3", "worker/main.py" }
-  local worker_cwd = state.config.worker_cwd or vim.fn.getcwd()
+  local worker_cwd = state.config.worker_cwd or project_root()
   if not state.config.worker_command then
     local project_python = worker_cwd .. "/.venv-x86/bin/python"
     if vim.fn.filereadable(project_python) == 1 then
@@ -128,6 +136,10 @@ end
 
 function M.status()
   return { active = state.job ~= nil }
+end
+
+function M.project_root()
+  return project_root()
 end
 
 return M
