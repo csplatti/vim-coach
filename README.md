@@ -1,392 +1,277 @@
 # Vim Coach
 
-Vim Coach is a native Neovim prototype that will capture supported editing
-episodes, suggest shorter Vim sequences, verify them by replay, and teach them
-through a scratch-buffer drill.
-
-The intended product direction is now a **batch review coach**: Neovim stays
-quiet while you work, episodes are analyzed in batches, and verified lessons
-become learning goals rather than appearing inline while you edit.
-
-The recorder captures both edits and inefficient motion-only episodes. By
-default, navigation must contain at least four supported keys and move the
-cursor before it is queued, avoiding coaching for every ordinary movement.
-Completed episodes start analysis automatically when no request is active.
-Episodes recorded during an active request are sent together as the next batch.
-Navigation analysis prefers unseen semantic motions over another example of
-an already introduced count.
-
-The current curated feature catalog contains 54 replay-supported help topics.
-It includes counts; basic, word, line, file, pair, sentence, and paragraph
-motions; character-find motions; word, quote, parenthesis, and brace text
-objects; bounded delete/change operators; and single-character replacement.
-The installed Neovim runtime has thousands of help tags, so this remains a
-safe subset rather than a claim of full Vim coverage.
-
-Recommendation discovery is hybrid. A local catalog generator creates bounded
-programs from those features, the model may add contextual candidates, and
-replay validates both sources identically. Modal failure no longer fails the
-batch: local catalog candidates are still verified and persisted, with the
-provider error returned as a warning. Lesson history is used as a small skill
-profile so concepts already introduced, dismissed, or marked known are not
-emitted as duplicate lessons.
-
-## Development baseline
-
-The current development machine has:
-
-```text
-NVIM v0.9.4
-LuaJIT 2.1.1700008891
-```
-
-The demo profile is tested against Neovim 0.9.4. Verify the executable with:
-
-```sh
-nvim --version
-```
-
-## Run the minimal profile
-
-From the repository root:
-
-```sh
-nvim -u demo/minimal.lua
-```
-
-This loads the plugin directly from the checkout with local recording enabled
-and cloud analysis disabled. The recorder currently supports bounded ASCII
-Normal-mode motion and deletion episodes. It waits for the configured idle
-boundary, discards navigation-only edits, and keeps snapshots in memory.
-
-## Install in NvChad
-
-The repository is a standard local Neovim plugin. Add it to NvChad's
-`lua/custom/plugins.lua` with `dir` pointing at this checkout, set `lazy =
-false`, and call `require("vim_coach").setup(...)` from its `config` function.
-After that, ordinary `nvim` launches load Vim Coach; `-u demo/minimal.lua` is
-only needed for the isolated development profile. The worker discovers the
-plugin root automatically and loads the ignored project `.env` when present.
-
-To see capture status without source text:
-
-```vim
-:VimCoachStatus
-```
-
-Open the in-editor command guide at any time with:
-
-```vim
-:VimCoachHelp
-```
-
-It lists every Vim Coach command and its purpose. Press `q` to close it.
-
-## Learning goals and stats
-
-Every new lesson becomes a local learning goal. Vim Coach counts successful,
-supported Normal-mode command sequences after the lesson is introduced. A
-counted command such as `3w` reinforces both the count goal and the word-motion
-goal. Progress stores only feature identifiers, bindings, aggregate counts,
-statuses, and timestamps; it does not store buffer text.
-
-Open the interactive goal list with:
-
-```vim
-:VimCoachGoals
-```
-
-Use `j`/`k` to move, `Enter` for details, `x` to pause or resume a goal, `r`
-to refresh, and `q` to close. The default target is 50 successful uses and can
-be changed with `goal_target` in `setup()`.
-
-Completed goals and aggregate use counts are available with:
-
-```vim
-:VimCoachStats
-```
-
-Goal progress is stored atomically in
-`~/.local/state/vim-coach/goals.json`, alongside the existing lesson history.
-Set `goals_file` in `setup()` or `VIM_COACH_GOALS_FILE` to override it.
-
-Reset all persisted lessons, learning goals, and progress with:
-
-```vim
-:VimCoachResetProfile
-```
-
-The command asks for confirmation. Use `:VimCoachResetProfile!` only when an
-intentional non-interactive reset is needed. It does not change plugin settings
-or edit project files.
-
-## Replay verifier
-
-Step 3 adds a standalone deterministic verifier. It launches a fresh headless
-Neovim child for the original and candidate token arrays, then compares the
-resulting buffer, final-newline state, cursor, Normal mode, and tracked
-registers. A batch replays the original sequence once per episode and reuses
-that baseline for every candidate.
-
-The standalone verifier defaults to strict register equality. Coaching uses an
-explicit `editing-outcome` policy: text, cursor, final mode, and final-newline
-state must match, while register differences are measured and disclosed rather
-than rejecting idiomatic replacements such as `D` for repeated `x`. Lessons
-must not describe these as full Vim-state equivalence.
-
-The verifier accepts a JSON payload containing `before`, `after`,
-`originalTokens`, and `candidateTokens`:
-
-```sh
-python3 replay/verify.py payload.json
-```
-
-Run the checked-in fixture with:
-
-```sh
-python3 replay/verify.py tests/fixtures/replay-basic.json
-```
-
-It should report `accepted: true`, with the candidate saving one logical key.
-
-The child receives structured JSON and a validated token array only. It does
-not execute model-provided Lua, Ex commands, shell commands, or arbitrary
-source text.
-
-## Modal proposal worker
-
-Step 4 adds an opt-in local worker using Modal's OpenAI-compatible endpoint.
-Configure credentials locally, outside Git:
-
-```sh
-export MODAL_API_KEY='...'
-export MODAL_BASE_URL='https://inference.us-west.modal.direct/v1'
-```
-
-Copy `.env.example` to `.env` and replace the placeholder token and endpoint
-URL from Modal's request example. `MODAL_BASE_URL` is used exactly as provided;
-it should be the API base URL, not a specific `/models` or `/chat/completions`
-request URL. Modal Shared Endpoints use a proxy token; the worker discovers the
-available endpoint/model automatically.
-`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RETRIES`, and `LLM_TIMEOUT_SECONDS` are all
-optional. When absent, the worker does not impose those project-level limits
-and leaves the provider client defaults in effect.
-
-The worker refuses requests unless the input contains `cloudEnabled: true`.
-It sends only minimized before/after text, cursor state, allowed grammar, and
-the original token sequence; registers, paths, and unrelated editor state stay
-local. Responses are validated and compiled locally before replay verification.
-
-No live provider request is made by the test suite. To test the configured
-endpoint after explicit approval, use the client from a controlled Python
-session:
-
-```python
-from worker.provider import LLMClient, LLMConfig
-
-client = LLMClient(LLMConfig.from_env(cloud_enabled=True))
-print(client._model())  # auto
-```
-
-Then the JSON worker accepts an episode on stdin:
-
-```sh
-printf '%s' '{"schemaVersion":1,"cloudEnabled":true,"episode":{}}' \
-  | python3 worker/main.py
-```
-
-The empty episode above is expected to fail locally; it is only a transport
-smoke test and does not upload anything without valid credentials.
-
-## Current batch-review prototype
-
-Captured edits enter a bounded in-memory queue and never open an inline card.
-When cloud analysis is enabled, the first completed episode starts one worker
-request automatically. Any episodes completed while that request is active
-remain queued and are sent together immediately after it finishes. Only one
-request runs at a time. `:VimCoachSync` remains available as a manual retry and
-debugging command. The worker validates the batch response, replay-verifies
-each candidate, and keeps only verified lesson records in memory.
-
-The batch worker also writes verified lesson metadata to
-`~/.local/state/vim-coach/lessons.json` (or `VIM_COACH_HISTORY_FILE` when set).
-Each review card introduces one reusable Vim feature with a feature title, a
-concise excerpt from the installed Neovim runtime documentation, an example
-binding, and the corresponding `:help` tag. AI prose is discarded before the
-lesson is persisted, so lessons do not critique or narrate the user's edit.
-The installed help catalog is also included in model context. For navigation,
-the worker supplements model proposals with bounded candidates from the whole
-supported feature catalog, including semantic motions, counts, delete forms,
-motion-plus-delete sequences, and anchored edits. It accepts them only when
-local replay proves the configured editing outcome. The model remains useful
-for contextual proposals, but ordinary catalog coverage does not depend on it.
-Raw before/after buffer snapshots are not persisted by default.
-
-Use `:VimCoachLesson` to see how many lessons are ready, `:VimCoachGoals` to
-track practice, and `:VimCoachStats` to review learned features. The old inline
-card remains only as a legacy demo fixture (`demo/suggestion.lua`) and is not
-used by automatic capture.
-
-## Practice drill
-
-Step 6 opens the last captured episode in a scratch buffer with
-`:VimCoachPractice`. The source buffer is never edited. Use
-`:VimCoachPracticeCheck` to compare the scratch buffer with the captured
-target, or `:VimCoachPracticeReset` to restore its starting state. Practice
-buffers are excluded from automatic recording.
-
-## Offline demo and checks
-
-The suggestion-card demo uses a labeled local fixture and makes no provider
-request:
-
-```sh
-nvim -u demo/suggestion.lua
-```
-
-Run the complete offline check before recording a demo:
-
-```sh
-python3 scripts/check.py
-```
-
-Run the live coverage harness to generate, batch, and replay-verify navigation
-and editing scenarios without typing them manually:
-
-```sh
-python3 scripts/evaluate_coach.py
-```
-
-This makes one provider batch request and reports proposed, verified, rejected,
-and expected bindings for each scenario.
-
-To measure deterministic catalog coverage without a provider request:
-
-```sh
-python3 scripts/evaluate_coach.py --local-only
-```
-
-The checked-in 39-scenario corpus currently verifies all 39 expected targets
-under the coaching outcome policy. This is curated grammar coverage, not a
-claim about all of Vim.
-
-To diagnose the Modal/provider endpoint without printing the API key, run:
-
-```sh
-python3 scripts/provider_diagnostic.py --env-file .env --mode basic
-```
-
-To compare plain chat and JSON response modes, run this explicitly. It makes
-three inference requests:
-
-```sh
-python3 scripts/provider_diagnostic.py --env-file .env --mode all
-```
-
-The output includes the provider response body, request IDs, latency, and a
-likely diagnosis. Do not paste the API key or the full request headers into a
-bug report.
-
-The worker now sends each provider candidate through the replay verifier and
-returns only verified, strictly shorter candidates. Provider failures,
-timeouts, malformed candidates, and replay mismatches fail closed. A live
-Modal request requires explicit opt-in, an API token, and an approved
-spending limit; the test suite never makes live requests.
-
-The provider worker uses the pinned OpenAI-compatible client in
-`requirements.txt`. It requests plain
-chat-completion mode for broad deployment compatibility, then applies the
-complete local candidate schema and replay verifier. On Apple Silicon systems
-running an x86_64 Neovim, the demo prefers `.venv-x86` automatically.
-
-Install it with:
+Vim Coach is a native Neovim plugin that watches supported editing and cursor
+movement sequences, finds shorter Vim alternatives, verifies them in a clean
+Neovim replay, and turns new techniques into learning goals.
+
+It stays out of the way while you work. A completed sequence is analyzed
+automatically. If another sequence is captured while analysis is running, it
+waits in a bounded queue and is included in the next batch.
+
+## What it does
+
+- Captures bounded Normal, Insert, and supported Visual-mode episodes.
+- Coaches inefficient edits and repeated cursor movements.
+- Generates candidates from a curated local Vim catalog and, optionally, a
+  Modal-hosted language model.
+- Rejects candidates unless replay reproduces the captured text, cursor,
+  final-newline state, and Normal mode.
+- Uses concise documentation from the installed Neovim runtime for lessons.
+- Avoids duplicate lessons by tracking concepts already introduced.
+- Creates practice goals and counts successful uses of learned bindings.
+- Stores lesson and goal metadata locally without persisting source snapshots.
+
+The supported catalog currently contains 54 replay-supported topics covering
+counts; word, line, file, pair, sentence, and paragraph motions; character
+finds; common text objects; bounded delete and change operations; and
+single-character replacement. It is intentionally a safe subset of Vim, not
+complete Vim emulation.
+
+## Requirements
+
+- Neovim 0.9.4 or newer
+- Python 3
+- The Python packages in `requirements.txt`
+- Optional: a Modal OpenAI-compatible endpoint and proxy token
+
+Create the worker environment from the repository root:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-If Neovim is x86_64 under Rosetta, install the matching worker environment:
+On an Apple Silicon machine running an x86_64 Neovim under Rosetta, create the
+matching environment instead:
 
 ```sh
 arch -x86_64 python3 -m venv .venv-x86
 arch -x86_64 .venv-x86/bin/python -m pip install -r requirements.txt
 ```
 
-When `cloud_enabled = true`, the plugin starts the local worker automatically
-after each completed episode. The default configuration keeps cloud analysis
-disabled, so local capture alone never implies permission to upload code.
+Vim Coach automatically prefers `.venv-x86`, then `.venv`, and otherwise
+falls back to `python3`.
 
-The minimal demo reads that opt-in from `VIM_COACH_CLOUD`:
+## Install with NvChad or lazy.nvim
+
+Add the checkout as a local plugin. For this NvChad setup, place the following
+in `lua/custom/plugins.lua`, replacing the path with your checkout:
+
+```lua
+{
+  dir = "/absolute/path/to/vim-coach",
+  name = "vim-coach",
+  lazy = false,
+  config = function()
+    require("vim_coach").setup({
+      enabled = true,
+      cloud_enabled = true,
+      idle_ms = 250,
+      goal_target = 10,
+    })
+  end,
+}
+```
+
+This is also a valid local lazy.nvim plugin specification. Restart Neovim
+after adding it. Vim Coach then loads during an ordinary launch—no custom
+`nvim -u ...` command or repository working directory is required.
+
+Confirm the installation with:
+
+```vim
+:VimCoachStatus
+```
+
+## Provider configuration
+
+Vim Coach can combine its local candidate catalog with contextual suggestions
+from a Modal endpoint. Copy the example environment file:
 
 ```sh
-VIM_COACH_CLOUD=1 nvim -u demo/minimal.lua -i NONE -n
+cp .env.example .env
 ```
 
-Provider prompt logging remains available as an explicit backend diagnostic,
-but the demo keeps it disabled.
+Then set the values supplied by Modal:
 
-## Current limits
-
-The finished prototype is intentionally bounded: one native Neovim profile,
-ordinary file buffers, printable ASCII literal edits, and a curated command
-grammar. It captures Normal and Insert mode plus bounded characterwise and
-linewise Visual edits. Blockwise Visual mode, arbitrary mappings, macros,
-pattern search, paste/register execution, cross-file edits, Unicode literal
-changes, and VSCodeVim integration remain future work. The replay child is a
-deterministic process, not a general OS security sandbox.
-
-## Batch review architecture
-
-The next implementation should follow this loop:
-
-```text
-Neovim capture → local queue → batched LLM request → replay verification
-→ persisted lessons → native Neovim goals and practice
+```dotenv
+MODAL_API_KEY=your_modal_proxy_token
+MODAL_BASE_URL=https://your-modal-api-base/v1
 ```
 
-Neovim never opens a suggestion card after an edit. It records bounded
-episodes and uses a single-flight dispatcher: send immediately while idle,
-accumulate while busy, then drain all accumulated episodes as the next batch.
-`:VimCoachSync` retries pending work manually.
+`MODAL_BASE_URL` is used exactly as written. It must be the API base URL, not a
+specific `/models` or `/chat/completions` route. The provider selects its
+available model automatically; there is no model-name environment variable.
 
-The local worker accepts an array of episodes, asks the model for suggestions,
-replay-verifies every candidate, and persists only verified lesson metadata.
-Source snapshots should remain ephemeral by default; persisted history should contain tokens, concepts,
-explanations, counts, timestamps, and verification scope unless the user
-explicitly opts into keeping practice examples.
+The worker automatically loads `.env` from the plugin checkout without
+overriding variables already exported by the shell. These optional settings
+are only applied when present:
 
-The native Neovim interface provides lesson counts, goals, statistics,
-practice, dismissal, and reset commands backed by local JSON state. No public
-backend, account system, or vector database is required. Retrieval can begin
-with concept IDs, token-pattern matching, and recent practice history; add
-embeddings only if that simple retrieval is demonstrably insufficient.
+```dotenv
+LLM_MAX_OUTPUT_TOKENS=4096
+LLM_MAX_RETRIES=2
+LLM_TIMEOUT_SECONDS=60
+```
 
-Implementation order:
+Without those variables, Vim Coach adds no project-level output-token, retry,
+or timeout limit. If Modal is unavailable or unconfigured, batch analysis
+falls back to locally generated candidates and reports the provider warning.
 
-1. Replace per-episode worker calls with a bounded local queue.
-2. Add a batch request/response contract keyed by episode ID.
-3. Add local lesson history and retrieval without raw source by default.
-4. Preserve replay verification as the acceptance gate for every suggestion.
-5. Build native Neovim lesson, goal, statistics, and practice views.
-6. Keep Practice, Dismiss, I Know, and reset state in the plugin.
-7. Remove or disable the inline suggestion card and measure review/practice
-   completion.
+Setting `cloud_enabled = true` explicitly permits provider analysis. Keep it
+`false` when source text must never leave the machine; capture and progress
+tracking still run, but automatic analysis is disabled.
 
-Available commands:
+## Daily use
 
-```text
-:VimCoachPause
-:VimCoachResume
+Edit normally. When Vim Coach recognizes a supported completed sequence, it
+queues and analyzes it automatically. You do not need to run a command after
+every edit.
+
+Useful starting points:
+
+```vim
+:VimCoachHelp
 :VimCoachStatus
-:VimCoachSync
-:VimCoachAnalyze
-:VimCoachLesson
-:VimCoachDismiss
-:VimCoachKnow
-:VimCoachPractice
-:VimCoachPracticeCheck
-:VimCoachPracticeReset
-:VimCoachResetData
-:VimCoachResetProfile
+:VimCoachGoals
+:VimCoachStats
 ```
+
+`VimCoachHelp` opens the complete in-editor command guide. Press `q` to close
+the help, goals, or statistics buffer.
+
+Each verified new concept becomes a goal. `:VimCoachGoals` supports:
+
+- `j`/`k`: move through goals
+- `Enter`: show goal details
+- `x`: pause or resume a goal
+- `r`: refresh
+- `q`: close
+
+The configured `goal_target` controls how many successful uses complete a
+goal. A sequence can reinforce more than one concept—for example, `3w` can
+advance both count and word-motion goals.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `:VimCoachHelp` | Open the command guide. |
+| `:VimCoachStatus` | Show capture, queue, worker, and recorder status. |
+| `:VimCoachPause` | Pause recording and automatic analysis. |
+| `:VimCoachResume` | Resume recording and automatic analysis. |
+| `:VimCoachSync` | Retry or manually send queued episodes. |
+| `:VimCoachAnalyze` | Alias for `:VimCoachSync`. |
+| `:VimCoachLesson` | Show the number of verified lessons ready. |
+| `:VimCoachGoals` | Open learning goals and progress. |
+| `:VimCoachStats` | Open learned-feature statistics. |
+| `:VimCoachPractice` | Practice the latest captured edit in a scratch buffer. |
+| `:VimCoachPracticeCheck` | Check the current practice result. |
+| `:VimCoachPracticeReset` | Restore the practice buffer to its starting state. |
+| `:VimCoachDismiss` | Dismiss the current legacy inline lesson. |
+| `:VimCoachKnow` | Suppress the current legacy inline concept. |
+| `:VimCoachResetData` | Clear queued in-memory episode data. |
+| `:VimCoachResetProfile` | Confirm and erase persisted lessons, goals, and progress. |
+| `:VimCoachResetProfile!` | Erase the profile without confirmation. |
+
+Practice uses a scratch buffer and never modifies the source buffer.
+
+## Configuration
+
+These are the main `setup()` options and their defaults:
+
+```lua
+require("vim_coach").setup({
+  enabled = true,
+  cloud_enabled = false,
+  idle_ms = 250,
+  cooldown_ms = 60000,
+  max_lines = 100,
+  max_buffer_bytes = 8192,
+  max_episode_keys = 128,
+  max_episode_ms = 10000,
+  max_candidates = 3,
+  max_pending_episodes = 20,
+  min_navigation_keys = 4,
+  replay_timeout_ms = 1000,
+  goal_target = 50,
+})
+```
+
+`debug_prompt = true` writes captured request diagnostics and should only be
+used deliberately because those logs can contain source text. `worker_command`,
+`worker_cwd`, `history_file`, and `goals_file` are available for development
+or custom storage setups.
+
+## How verification works
+
+For every candidate, Vim Coach launches a disposable headless Neovim process
+and replays the original and proposed sequences. A coaching candidate is
+accepted only when text, cursor, final mode, and final-newline state match.
+Register differences are recorded but do not reject otherwise useful idioms
+such as replacing repeated `x` commands with `D`.
+
+Model output is treated as untrusted data. Candidate tokens must pass a strict
+local schema and grammar. The replay process does not execute model-provided
+Lua, Ex commands, shell commands, or arbitrary code.
+
+## Local data and privacy
+
+Vim Coach stores state under `~/.local/state/vim-coach/` by default:
+
+- `lessons.json`: verified lesson metadata
+- `goals.json`: goal status and aggregate usage counts
+
+Set `VIM_COACH_HISTORY_FILE` or `VIM_COACH_GOALS_FILE` to override these paths.
+Persisted records contain feature identifiers, bindings, counts, status, and
+timestamps—not raw before/after source snapshots.
+
+When provider analysis is enabled, the request contains the bounded episode's
+before/after text, cursor state, original token sequence, allowed grammar, and
+lesson context. Paths, registers, and unrelated buffers are not uploaded.
+
+## Demo and development
+
+An isolated profile is available for development:
+
+```sh
+nvim -u demo/minimal.lua
+```
+
+It keeps provider analysis disabled unless explicitly enabled:
+
+```sh
+VIM_COACH_CLOUD=1 nvim -u demo/minimal.lua
+```
+
+The guided playground is `vim-coach-playground.txt`.
+
+Run the complete offline suite with:
+
+```sh
+python3 scripts/check.py
+```
+
+Run the deterministic 39-scenario catalog evaluation without a provider call:
+
+```sh
+python3 scripts/evaluate_coach.py --local-only
+```
+
+Run the live evaluation or provider diagnostic only when you intend to make
+real endpoint requests:
+
+```sh
+python3 scripts/evaluate_coach.py
+python3 scripts/provider_diagnostic.py --env-file .env --mode basic
+```
+
+The test suite itself makes no live provider requests.
+
+## Current limitations
+
+Vim Coach targets ordinary single-buffer editing with a curated command
+grammar. It supports printable ASCII edits and bounded characterwise and
+linewise Visual operations. It does not currently cover blockwise Visual mode,
+arbitrary mappings or macros, pattern search, paste/register execution,
+cross-file edits, Unicode literal changes, or VSCodeVim. Replay is a
+deterministic correctness check, not a general operating-system sandbox.
