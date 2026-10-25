@@ -11,7 +11,8 @@ appear in a separate review app rather than inline in the editor.
 The recorder captures both edits and inefficient motion-only episodes. By
 default, navigation must contain at least four supported keys and move the
 cursor before it is queued, avoiding coaching for every ordinary movement.
-Each manual sync analyzes every episode currently waiting in the queue.
+Completed episodes start analysis automatically when no request is active.
+Episodes recorded during an active request are sent together as the next batch.
 Navigation analysis prefers unseen semantic motions over another example of
 an already introduced count.
 
@@ -172,11 +173,13 @@ smoke test and does not upload anything without valid credentials.
 
 ## Current batch-review prototype
 
-Captured edits now enter a bounded in-memory queue. They do not trigger a
-provider request or an inline card. Use `:VimCoachStatus` to see the pending
-count, then `:VimCoachSync` to send up to five queued episodes in one worker
-request. The worker validates the batch response, replay-verifies each
-candidate, and keeps only verified lesson records in memory.
+Captured edits enter a bounded in-memory queue and never open an inline card.
+When cloud analysis is enabled, the first completed episode starts one worker
+request automatically. Any episodes completed while that request is active
+remain queued and are sent together immediately after it finishes. Only one
+request runs at a time. `:VimCoachSync` remains available as a manual retry and
+debugging command. The worker validates the batch response, replay-verifies
+each candidate, and keeps only verified lesson records in memory.
 
 The batch worker also writes verified lesson metadata to
 `~/.local/state/vim-coach/lessons.json` (or `VIM_COACH_HISTORY_FILE` when set).
@@ -289,10 +292,9 @@ arch -x86_64 python3 -m venv .venv-x86
 arch -x86_64 .venv-x86/bin/python -m pip install -r requirements.txt
 ```
 
-When `cloud_enabled = true`, the plugin starts the local worker only after a
-manual `:VimCoachSync` (or the backwards-compatible `:VimCoachAnalyze`).
-Completed captures remain local until that batch trigger. The default
-configuration keeps cloud analysis disabled.
+When `cloud_enabled = true`, the plugin starts the local worker automatically
+after each completed episode. The default configuration keeps cloud analysis
+disabled, so local capture alone never implies permission to upload code.
 
 The minimal demo reads that opt-in from `VIM_COACH_CLOUD`:
 
@@ -319,7 +321,7 @@ pattern search, paste/register execution, cross-file edits, Unicode literal
 changes, and VSCodeVim integration remain future work. The replay child is a
 deterministic process, not a general OS security sandbox.
 
-## Next architecture: batch review app
+## Batch review architecture
 
 The next implementation should follow this loop:
 
@@ -328,10 +330,10 @@ Neovim capture → local queue → batched LLM request → replay verification
 → persisted lesson inbox → separate review/practice app
 ```
 
-Neovim must not call the provider or open a suggestion card after each edit.
-It should only record bounded episodes, show a quiet pending-count/status
-indicator, and expose a manual `:VimCoachSync` command. An explicit sync sends
-every episode currently waiting in the bounded local queue.
+Neovim never opens a suggestion card after an edit. It records bounded
+episodes and uses a single-flight dispatcher: send immediately while idle,
+accumulate while busy, then drain all accumulated episodes as the next batch.
+`:VimCoachSync` retries pending work manually.
 
 The local worker accepts an array of episodes, asks the model for suggestions,
 replay-verifies every candidate, and persists only verified lesson metadata.

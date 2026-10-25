@@ -68,6 +68,6 @@ time.
 One. Two.
 
 
-When you are finished, pause and sync Vim Coach. Open the review app to see
+Vim Coach sends each completed task automatically. Open the review app to see
 which shorter techniques it found. A technique already in your lesson history
 may not appear again.

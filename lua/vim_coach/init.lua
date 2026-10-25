@@ -37,6 +37,8 @@ local function notify(message, level)
   vim.notify("Vim Coach: " .. message, level or vim.log.levels.INFO)
 end
 
+local pump_queue
+
 function M.setup(opts)
   state.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   state.paused = not state.config.enabled
@@ -46,13 +48,17 @@ function M.setup(opts)
   ui.setup(state.config)
   practice.setup(state.config)
   progress.setup(state.config)
-  worker.setup(state.config, function(result)
+  worker.setup(state.config, function(result, error_message)
     local batch = state.active_batch or {}
+    state.active_batch = nil
+    if error_message then
+      notify("batch failed: " .. error_message .. "; episodes kept for retry", vim.log.levels.WARN)
+      return
+    end
     queue.remove_ids(vim.tbl_map(function(episode)
       return episode.id
     end, batch))
     queue.add_lessons(result.suggestions or {}, batch)
-    state.active_batch = nil
     local lessons = 0
     for _, suggestion in ipairs(result.suggestions or {}) do
       lessons = lessons + #(suggestion.candidates or {})
@@ -70,6 +76,9 @@ function M.setup(opts)
         result.providerCandidateCount == 1 and "" or "s"
       ), vim.log.levels.WARN)
     end
+    vim.schedule(function()
+      pump_queue(false)
+    end)
   end)
 
   vim.g.vim_coach_enabled = state.config.enabled
@@ -78,14 +87,18 @@ function M.setup(opts)
   if state.config.enabled then
     recorder.setup(state.config, function(episode)
       notify(string.format(
-        "queued episode %d (%d logical keys); waiting for batch sync",
+        "queued episode %d (%d logical keys); automatic analysis pending",
         episode.id,
         episode.originalLogicalKeyCount
       ))
       local ok, reason = queue.enqueue(episode)
       if not ok and reason then
         notify(reason, vim.log.levels.WARN)
+        return
       end
+      vim.schedule(function()
+        pump_queue(false)
+      end)
     end, function(tokens)
       local completed = progress.record_tokens(tokens)
       for _, goal in ipairs(completed) do
@@ -105,6 +118,7 @@ function M.pause()
   vim.g.vim_coach_enabled = false
   recorder.pause()
   worker.cancel()
+  state.active_batch = nil
   notify("paused")
 end
 
@@ -112,6 +126,9 @@ function M.resume()
   state.paused = false
   vim.g.vim_coach_enabled = true
   recorder.resume()
+  vim.schedule(function()
+    pump_queue(false)
+  end)
   notify("resumed")
 end
 
@@ -175,29 +192,45 @@ function M.know()
   end
 end
 
-function M.sync()
+function pump_queue(manual)
   if not state.config.cloud_enabled then
-    notify("cloud analysis is disabled")
-    return
+    if manual then
+      notify("cloud analysis is disabled")
+    end
+    return false
   end
-  if worker.status().active then
-    notify("a batch is already running")
-    return
+  if state.paused or state.active_batch or worker.status().active then
+    if manual and (state.active_batch or worker.status().active) then
+      notify("a batch is already running; new episodes will follow automatically")
+    end
+    return false
   end
   local pending = queue.pending()
   if #pending == 0 then
-    notify("no queued episodes are ready to sync")
-    return
+    if manual then
+      notify("no queued episodes are ready to sync")
+    end
+    return false
   end
-  local batch = pending
-  state.active_batch = batch
-  local ok, reason = worker.request_batch(batch)
+  state.active_batch = pending
+  local ok, reason = worker.request_batch(pending)
   if not ok then
     state.active_batch = nil
     notify(reason, vim.log.levels.WARN)
-    return
+    return false
   end
-  notify(string.format("sent %d queued episode%s for batch analysis", #batch, #batch == 1 and "" or "s"))
+  if manual then
+    notify(string.format(
+      "sent %d episode%s for analysis",
+      #pending,
+      #pending == 1 and "" or "s"
+    ))
+  end
+  return true
+end
+
+function M.sync()
+  pump_queue(true)
 end
 
 function M.analyze()

@@ -7,8 +7,10 @@ local state = {
   on_result = nil,
 }
 
-local function notify(message, level)
-  vim.notify("Vim Coach: " .. message, level or vim.log.levels.INFO)
+local function finish(result, error_message)
+  if state.on_result then
+    state.on_result(result, error_message)
+  end
 end
 
 function M.setup(config, on_result)
@@ -74,24 +76,23 @@ local function start_request(request)
       end
       state.job = nil
       if exit_code ~= 0 then
-        notify("analysis worker exited with code " .. tostring(exit_code), vim.log.levels.WARN)
+        finish(nil, "analysis worker exited with code " .. tostring(exit_code))
         return
       end
       local ok, result = pcall(vim.fn.json_decode, table.concat(output, "\n"))
       if not ok or type(result) ~= "table" then
-        notify("analysis worker returned malformed JSON", vim.log.levels.WARN)
+        finish(nil, "analysis worker returned malformed JSON")
         return
       end
       if result.ok ~= true then
-        notify(result.error or "analysis worker failed", vim.log.levels.WARN)
+        finish(nil, result.error or "analysis worker failed")
         return
       end
       if request.batchId ~= nil and result.batchId ~= nil and result.batchId ~= request.batchId then
+        finish(nil, "analysis worker returned a mismatched batch ID")
         return
       end
-      if state.on_result then
-        state.on_result(result)
-      end
+      finish(result, nil)
     end,
   })
   if job <= 0 then

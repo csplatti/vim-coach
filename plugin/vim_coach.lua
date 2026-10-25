@@ -30,7 +30,7 @@ end, "Analyze the latest captured episode")
 
 command("VimCoachSync", function()
   coach.sync()
-end, "Send queued Vim Coach episodes as one batch")
+end, "Retry or manually send queued Vim Coach episodes")
 
 command("VimCoachLesson", function()
   coach.lesson()

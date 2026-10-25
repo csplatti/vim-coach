@@ -72,7 +72,7 @@ or sole source of feature discovery.
 2. Edit normally. The plugin records supported logical inputs into bounded memory; it does not make a model request on every key.
 3. After a short edit ends in Normal mode and the user pauses, the plugin freezes the before/after episode. Navigation without an edit is discarded for P0.
 4. A local eligibility check and original-sequence replay establish that the captured inputs explain the captured change. Eligible episodes enter the local batch queue.
-5. On a batch trigger, send minimized episodes to the worker. Validate the response, replay candidates in disposable headless Neovim processes, and reject mismatches or unsafe syntax.
+5. If no request is active, send the eligible episode immediately. While one request is active, queue new episodes and send them together as the next batch when it finishes. Validate the response, replay candidates in disposable headless Neovim processes, and reject mismatches or unsafe syntax.
 6. Persist only verified lesson metadata in the local inbox. Each lesson introduces one reusable Vim feature using a concise excerpt and help tag from the installed Neovim runtime documentation; discard AI teaching prose rather than explaining a user mistake. Show a quiet pending count in Neovim; do not open an inline suggestion card.
 7. The separate review app shows one lesson at a time. Practice opens a scratch buffer containing the original example; **Check** compares the result with the target, and **Reset** restores the start.
 
@@ -244,11 +244,11 @@ Use `idle → recording → settling → queued → analyzing → ready`, with c
 
 **Continue:** append supported tokens and mark changes. `TextChanged`, `TextChangedI`, and `ModeChanged` mark the episode dirty and schedule work; event counts are not key counts. Keep the input hook cheap: no network, disk, model calls, or expensive whole-buffer copy on every key.
 
-**Seal:** after roughly 800–1200 ms idle, schedule a generation-guarded finalizer. Require the same buffer/window, exact Normal mode, a complete original-command grammar, and a real text change. Capture after-state only when input has settled. `InsertLeave` alone is not a sufficient boundary; some exits do not trigger it. [Pinned event documentation](https://github.com/neovim/neovim/blob/v0.11.4/runtime/doc/autocmd.txt)
+**Seal:** after roughly 250 ms idle, schedule a generation-guarded finalizer. Require the same buffer/window, exact Normal mode, a complete original-command grammar, and a real text change. Capture after-state only when input has settled. `InsertLeave` alone is not a sufficient boundary; some exits do not trigger it. [Pinned event documentation](https://github.com/neovim/neovim/blob/v0.11.4/runtime/doc/autocmd.txt)
 
 **Discard:** command-line entry, buffer/window switch, focus loss, macro execution/recording, uncertain remapping, paste/IME, unsupported special input, oversized episode, or unaccounted external change. Detect obvious causes; the original replay gate catches discrepancies you missed. Never silently “repair” missing keys by asking the model to guess them.
 
-Every async job carries episode ID, generation, buffer identity, and target `changedtick`. Cancel superseded work; ignore late results. If the source has changed, keep a result only as an explicitly historical practice example, not a current instruction. Limit the queue to one active and one latest pending episode.
+Every async job carries episode ID, generation, buffer identity, and target `changedtick`. Cancel superseded work; ignore late results. If the source has changed, keep a result only as an explicitly historical practice example, not a current instruction. Allow one active request and a bounded pending queue; drain the entire pending queue into one follow-up batch after success. Preserve episodes after failure for a later automatic or manual retry.
 
 Suggested limits: complete buffer at most 100 lines or 8 KiB, episode at most 10 seconds/128 logical inputs, three candidates, one active provider request, and one active replay. Fail closed when exceeding limits. Do not crop the replay buffer and then claim whole-buffer equivalence.
 
