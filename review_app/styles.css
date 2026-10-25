@@ -19,10 +19,18 @@ button.secondary { background: #2a3040; color: #eef1f7; }
 .card-top, .actions { display: flex; align-items: center; gap: 10px; }
 .card-top { justify-content: space-between; color: #8f99ac; font-size: 13px; }
 .tag { color: #b9c8ff; }
+.suggestion-title { display: flex; align-items: center; gap: 12px; margin: 20px 0 10px; font-size: 20px; }
+.key-sequence { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.key-sequence kbd { min-width: 22px; padding: 5px 7px; border: 1px solid #3b4354; border-bottom-width: 3px; border-radius: 6px; background: #0c0e13; color: #c7cddd; font: 600 15px/1 ui-monospace, "SFMono-Regular", Consolas, monospace; text-align: center; }
+.new-keys kbd { border-color: #5f78ca; background: #202b4d; color: #e1e7ff; }
+.sequence-arrow { flex: 0 0 auto; color: #74809a; font-size: 22px; font-weight: 400; }
+.concept { margin: 0 0 12px; color: #eef1f7; font-size: 15px; font-weight: 600; }
 .lesson-intro { margin-bottom: 16px; }
-.sequence { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border-radius: 8px; background: #0c0e13; }
-.sequence span { color: #8f99ac; font-size: 13px; }
 .help-link { font-size: 13px; }
 code { color: #d6ddff; }
 .scope { font-size: 13px; }
 .actions { margin-top: 20px; flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .suggestion-title { align-items: flex-start; flex-direction: column; }
+  .sequence-arrow { transform: rotate(90deg); }
+}

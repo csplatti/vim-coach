@@ -64,6 +64,34 @@ To see capture status without source text:
 :VimCoachStatus
 ```
 
+## Learning goals and stats
+
+Every new lesson becomes a local learning goal. Vim Coach counts successful,
+supported Normal-mode command sequences after the lesson is introduced. A
+counted command such as `3w` reinforces both the count goal and the word-motion
+goal. Progress stores only feature identifiers, bindings, aggregate counts,
+statuses, and timestamps; it does not store buffer text.
+
+Open the interactive goal list with:
+
+```vim
+:VimCoachGoals
+```
+
+Use `j`/`k` to move, `Enter` for details, `x` to pause or resume a goal, `r`
+to refresh, and `q` to close. The default target is 50 successful uses and can
+be changed with `goal_target` in `setup()`.
+
+Completed goals and aggregate use counts are available with:
+
+```vim
+:VimCoachStats
+```
+
+Goal progress is stored atomically in
+`~/.local/state/vim-coach/goals.json`, alongside the existing lesson history.
+Set `goals_file` in `setup()` or `VIM_COACH_GOALS_FILE` to override it.
+
 ## Replay verifier
 
 Step 3 adds a standalone deterministic verifier. It launches a fresh headless

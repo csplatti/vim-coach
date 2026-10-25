@@ -15,6 +15,7 @@ local state = {
   last_skip_reason = "none",
   last_episode = nil,
   on_episode = nil,
+  on_observation = nil,
   synthetic_tail = nil,
 }
 
@@ -126,11 +127,16 @@ local function finish(generation)
       clear_current("text-preserving episode contains a non-navigation command")
       return
     end
+    if state.on_observation then
+      pcall(state.on_observation, vim.deepcopy(state.current.resolved_tokens))
+    end
     if #state.current.resolved_tokens < (state.config.min_navigation_keys or 4) then
       clear_current("navigation episode is below the coaching threshold")
       return
     end
     episode_kind = "navigation"
+  elseif state.on_observation then
+    pcall(state.on_observation, vim.deepcopy(state.current.resolved_tokens))
   end
 
   local episode = {
@@ -164,9 +170,10 @@ schedule_finish = function()
   end, state.config.idle_ms)
 end
 
-function M.setup(config, on_episode)
+function M.setup(config, on_episode, on_observation)
   state.config = config
   state.on_episode = on_episode
+  state.on_observation = on_observation
   state.running = true
   state.current = nil
   state.suppressed = false

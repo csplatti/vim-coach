@@ -19,6 +19,11 @@ def run(command: list[str]) -> None:
 def main() -> int:
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
     run([sys.executable, "replay/verify.py", "tests/fixtures/replay-basic.json"])
+    run([
+        "nvim", "--headless", "-u", "NONE", "-i", "NONE", "-n",
+        "-c", "lua dofile('tests/goals_spec.lua')",
+        "-c", "qa!",
+    ])
     run(["nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n", "+VimCoachStatus", "+qa!"])
     run([
         "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",

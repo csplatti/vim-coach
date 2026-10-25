@@ -45,13 +45,13 @@ local function install_autocmds()
   })
 end
 
-function M.setup(config, on_episode)
+function M.setup(config, on_episode, on_observation)
   state.config = config
   state.healthy = true
   state.last_error = nil
   state.initialized = true
   install_autocmds()
-  episodes.setup(config, on_episode)
+  episodes.setup(config, on_episode, on_observation)
   M.start()
 end
 

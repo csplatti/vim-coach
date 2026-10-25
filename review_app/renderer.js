@@ -28,6 +28,27 @@ function escapeHtml(value) {
   }[character]));
 }
 
+function renderKeySequence(tokens) {
+  if (!Array.isArray(tokens) || !tokens.length) return "";
+  return tokens.map((token) => `<kbd>${escapeHtml(token)}</kbd>`).join("");
+}
+
+function renderSuggestionTitle(lesson) {
+  const original = renderKeySequence(lesson.originalTokens);
+  const replacement = renderKeySequence(lesson.compiledTokens);
+  if (!original || !replacement) {
+    return `<h2>${escapeHtml(lesson.concept)}</h2>`;
+  }
+  return `
+    <h2 class="suggestion-title" aria-label="${escapeHtml(lesson.originalTokens.join(""))} becomes ${escapeHtml(lesson.compiledTokens.join(""))}">
+      <span class="key-sequence old-keys">${original}</span>
+      <span class="sequence-arrow" aria-hidden="true">→</span>
+      <span class="key-sequence new-keys">${replacement}</span>
+    </h2>
+    <p class="concept">${escapeHtml(lesson.concept)}</p>
+  `;
+}
+
 function render(history) {
   const byFeature = new Map();
   for (const lesson of history.lessons || []) {
@@ -46,9 +67,8 @@ function render(history) {
   inbox.innerHTML = active.map((lesson) => `
     <article class="card" data-id="${escapeHtml(lesson.lessonId)}">
       <div class="card-top"><span class="tag">New Vim feature</span><span>${lesson.savedLogicalKeys ?? "?"} keys saved</span></div>
-      <h2>${escapeHtml(lesson.concept)}</h2>
+      ${renderSuggestionTitle(lesson)}
       <p class="lesson-intro">${escapeHtml(lesson.explanation)}</p>
-      <p class="sequence"><span>Example binding</span><code>${escapeHtml(lesson.compiledTokens?.join(""))}</code></p>
       ${lesson.helpTag ? `<p class="help-link">Open the full documentation with <code>:help ${escapeHtml(lesson.helpTag)}</code></p>` : ""}
       <p class="scope">Verified replay · ${lesson.originalLogicalKeys ?? "?"} → ${lesson.candidateLogicalKeys ?? "?"} logical keys</p>
       <div class="actions">

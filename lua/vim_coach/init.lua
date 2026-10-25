@@ -4,6 +4,9 @@ local ui = require("vim_coach.ui")
 local practice = require("vim_coach.practice")
 local worker = require("vim_coach.worker")
 local queue = require("vim_coach.queue")
+local progress = require("vim_coach.progress")
+local goals = require("vim_coach.goals")
+local stats = require("vim_coach.stats")
 
 local defaults = {
   enabled = true,
@@ -20,6 +23,7 @@ local defaults = {
   provider_timeout_ms = 10000,
   replay_timeout_ms = 1000,
   debug_prompt = false,
+  goal_target = 50,
 }
 
 local state = {
@@ -41,6 +45,7 @@ function M.setup(opts)
   queue.setup(state.config)
   ui.setup(state.config)
   practice.setup(state.config)
+  progress.setup(state.config)
   worker.setup(state.config, function(result)
     local batch = state.active_batch or {}
     queue.remove_ids(vim.tbl_map(function(episode)
@@ -80,6 +85,11 @@ function M.setup(opts)
       local ok, reason = queue.enqueue(episode)
       if not ok and reason then
         notify(reason, vim.log.levels.WARN)
+      end
+    end, function(tokens)
+      local completed = progress.record_tokens(tokens)
+      for _, goal in ipairs(completed) do
+        notify(string.format("goal complete: %s (%s)", goal.title, table.concat(goal.binding or {}, "")))
       end
     end)
   else
@@ -213,6 +223,14 @@ function M.practice_reset()
   if not ok and reason then
     notify(reason)
   end
+end
+
+function M.goals()
+  goals.open()
+end
+
+function M.stats()
+  stats.open()
 end
 
 function M.reset_data()

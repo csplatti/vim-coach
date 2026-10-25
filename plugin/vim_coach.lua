@@ -36,6 +36,14 @@ command("VimCoachLesson", function()
   coach.lesson()
 end, "Show the Vim Coach review inbox status")
 
+command("VimCoachGoals", function()
+  coach.goals()
+end, "Open Vim Coach learning goals")
+
+command("VimCoachStats", function()
+  coach.stats()
+end, "Open Vim Coach learning statistics")
+
 command("VimCoachDismiss", function()
   coach.dismiss()
 end, "Dismiss the current Vim Coach lesson")

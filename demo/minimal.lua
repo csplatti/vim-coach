@@ -26,4 +26,7 @@ require("vim_coach").setup({
   -- Development only: prints captured source text and the full LLM request.
   debug_prompt = true,
   worker_cwd = repo_root,
+  -- Keep demo/check goal progress isolated from the user's real profile.
+  history_file = vim.fn.tempname() .. "-vim-coach-lessons.json",
+  goals_file = vim.fn.tempname() .. "-vim-coach-goals.json",
 })
