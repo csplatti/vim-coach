@@ -8,6 +8,8 @@ import re
 import subprocess
 from typing import Any
 
+from worker.contracts import CHANGE_COMMANDS, DELETE_COMMANDS, FIND_COMMANDS
+
 
 FEATURES: dict[str, tuple[str, str, str]] = {
     "count": ("Counts", "count", r"^\[count\]\s+"),
@@ -28,12 +30,42 @@ FEATURES: dict[str, tuple[str, str, str]] = {
     "^": ("Move to the first non-blank character", "^", r"^\^\s+"),
     "$": ("Move to the end of a line", "$", r"^\$\s+"),
     "%": ("Jump to a matching pair", "%", r"^%\s+"),
+    "{": ("Move to the previous paragraph", "{", r"^\{\s+"),
+    "}": ("Move to the next paragraph", "}", r"^\}\s+"),
+    "(": ("Move to the previous sentence", "(", r"^\(\s+"),
+    ")": ("Move to the next sentence", ")", r"^\)\s+"),
+    ";": ("Repeat the latest character find", ";", r"^;\s+"),
+    ",": ("Repeat a character find backward", ",", r"^,\s+"),
+    "f": ("Find a character forward", "f", r"^f\{char\}\s+"),
+    "F": ("Find a character backward", "F", r"^F\{char\}\s+"),
+    "t": ("Move until a character", "t", r"^t\{char\}\s+"),
+    "T": ("Move backward until a character", "T", r"^T\{char\}\s+"),
     "x": ("Delete characters", "x", r'^\["x\]x\s+'),
     "D": ("Delete to the end of a line", "D", r'^\["x\]D\s+'),
     "dd": ("Delete lines", "dd", r'^\["x\]dd\s+'),
     "dw": ("Delete with a motion", "d", r'^\["x\]d\{motion\}\s+'),
     "diw": ("Delete inside a word", "iw", r"^iw\s+"),
     "daw": ("Delete around a word", "aw", r"^aw\s+"),
+    'di"': ("Delete inside quotes", 'i"', r'^i"\s+'),
+    'da"': ("Delete around quotes", 'a"', r'^a"\s+'),
+    "di(": ("Delete inside parentheses", "i(", r"^i\(\s+"),
+    "da(": ("Delete around parentheses", "a(", r"^a\(\s+"),
+    "di{": ("Delete inside braces", "i{", r"^i\{\s+"),
+    "da{": ("Delete around braces", "a{", r"^a\{\s+"),
+    "d$": ("Delete to the end of a line", "d$", r"^d\$\s+"),
+    "d0": ("Delete to the start of a line", "d0", r"^d0\s+"),
+    "dG": ("Delete through the last line", "dG", r"^dG\s+"),
+    "dgg": ("Delete through the first line", "dgg", r"^dgg\s+"),
+    "cw": ("Change through a word motion", "cw", r"^cw\s+"),
+    "ciw": ("Change inside a word", "ciw", r"^ciw\s+"),
+    'ci"': ("Change inside quotes", 'ci"', r'^ci"\s+'),
+    'ca"': ("Change around quotes", 'ca"', r'^ca"\s+'),
+    "ci(": ("Change inside parentheses", "ci(", r"^ci\(\s+"),
+    "ca(": ("Change around parentheses", "ca(", r"^ca\(\s+"),
+    "ci{": ("Change inside braces", "ci{", r"^ci\{\s+"),
+    "ca{": ("Change around braces", "ca{", r"^ca\{\s+"),
+    "C": ("Change to the end of a line", "C", r'^\["x\]C\s+'),
+    "r": ("Replace one character", "r", r"^r\{char\}\s+"),
 }
 
 
@@ -107,8 +139,14 @@ def feature_catalog(runtime: Path | None = None) -> list[dict[str, Any]]:
     for key, (title, tag, prefix) in FEATURES.items():
         if key == "count":
             token = {"kind": "count", "value": "1-20"}
-        elif key in {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%"}:
+        elif key in {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%", "{", "}", "(", ")", ";", ","}:
             token = {"kind": "move", "key": key}
+        elif key in FIND_COMMANDS:
+            token = {"kind": "find", "command": key, "target": "{char}"}
+        elif key in CHANGE_COMMANDS:
+            token = {"kind": "change", "command": key, "text": "{text}"}
+        elif key == "r":
+            token = {"kind": "replace", "target": "{char}"}
         else:
             token = {"kind": "delete", "command": key}
         catalog.append({
@@ -121,11 +159,21 @@ def feature_catalog(runtime: Path | None = None) -> list[dict[str, Any]]:
 
 
 def _feature_key(candidate: dict[str, Any]) -> str | None:
+    explicit = candidate.get("_featureKey")
+    if isinstance(explicit, str) and explicit in FEATURES:
+        return explicit
     tokens = candidate.get("tokens", [])
     original_tokens = set(candidate.get("originalTokens", []))
     if any(token.get("kind") == "count" for token in tokens if isinstance(token, dict)):
         if not any(isinstance(token, str) and token.isdigit() for token in original_tokens):
             return "count"
+    for token in tokens:
+        if isinstance(token, dict) and token.get("kind") == "find":
+            return token.get("command")
+        if isinstance(token, dict) and token.get("kind") == "change":
+            return token.get("command")
+        if isinstance(token, dict) and token.get("kind") == "replace":
+            return "r"
     for token in tokens:
         if (
             isinstance(token, dict)
@@ -142,6 +190,13 @@ def _feature_key(candidate: dict[str, Any]) -> str | None:
             return token.get("command")
     if any(token.get("kind") == "count" for token in tokens if isinstance(token, dict)):
         return "count"
+    for token in tokens:
+        if isinstance(token, dict) and token.get("kind") == "find":
+            return token.get("command")
+        if isinstance(token, dict) and token.get("kind") == "change":
+            return token.get("command")
+        if isinstance(token, dict) and token.get("kind") == "replace":
+            return "r"
     for token in tokens:
         if isinstance(token, dict) and token.get("kind") == "move":
             return token.get("key")

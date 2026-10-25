@@ -104,7 +104,7 @@ Only claim the states actually compared. A replay proves this concrete example u
 
 ### P2 after the hackathon
 
-VSCodeVim instrumentation, VSCode-Neovim integration, arbitrary mappings/macros, visual selections, cross-file edits, LSP-aware behavior, generated drill variants, and longitudinal learning evaluation.
+VSCodeVim instrumentation, VSCode-Neovim integration, arbitrary mappings/macros, blockwise visual selections, cross-file edits, LSP-aware behavior, generated drill variants, and longitudinal learning evaluation.
 
 **Do not build:** OS-wide Vim controls, a Vim replacement, accounts, a public backend, fine-tuning, embeddings, a vector database, mobile support, or autonomous code editing. This is an inference-and-validation systems project, not a model-training project.
 
@@ -236,7 +236,7 @@ A concrete model-response contract can start with:
 }
 ```
 
-This is a **proposal-format example, not a verified fixture**. Define `SafeToken` as a discriminated union: count with bounded integer `value`; move with an enumerated `key`; delete with an enumerated `command`. Require all fields, set `additionalProperties: false` on every object, limit candidates to three, bound token arrays and strings, and validate count placement with the stateful grammar after schema validation. The provider cannot supply accepted savings or verification status; the local compiler and replay engine compute them. Reject unknown schema versions and malformed responses rather than coercing them.
+This is a **proposal-format example, not a verified fixture**. Define `SafeToken` as a discriminated union: count with bounded integer `value`; move with an enumerated `key`; find with an enumerated command and one printable target; delete with an enumerated command; change with an enumerated command and bounded printable literal text; and replace with one printable target. Require all fields, set `additionalProperties: false` on every object, limit candidates to three, bound token arrays and strings, and validate placement with the stateful grammar after schema validation. The provider cannot supply accepted savings or verification status; the local compiler and replay engine compute them. Reject unknown schema versions and malformed responses rather than coercing them.
 
 Use `idle → recording → settling → queued → analyzing → ready`, with cancellation/unsupported exits. Permit recording only in approved, modifiable ordinary file buffers. Exclude terminal, prompt, command-line, help, plugin UI, practice, and secret/excluded buffers. Do not log command-line input.
 
@@ -277,18 +277,21 @@ behavior remain outside both prototype claims.
 
 ### A bounded grammar is the safety boundary
 
-Do not accept a raw Vim command string from the model. Accept a bounded typed token array and validate the complete sequence with a stateful parser. Initial vocabulary:
+Do not accept a raw Vim command string from the model. Accept a bounded typed token array and validate the complete sequence with a stateful parser. Current vocabulary:
 
-- `move`: `h`, `l`, `w`, `b`, `e`, `0`, `^`, `$`.
+- `move`: basic horizontal/vertical, word/WORD, line/file, pair, sentence, paragraph, and bounded find-repeat motions.
+- `find`: `f`, `F`, `t`, or `T` plus one printable ASCII target.
 - `count`: integer 1–20, only where the next complete command permits it.
-- `delete`: `x`, `D`, `dd`, `dw`, `diw`, `daw`.
-- P1: an explicitly defined change-word action plus literal ASCII text and Escape.
+- `delete`: bounded line, motion, and word/quote/parenthesis/brace text-object forms.
+- `change`: bounded word/text-object/line forms plus at most 64 printable ASCII literal characters and Escape.
+- `replace`: `r` plus one printable ASCII character.
+- Original episodes may also contain bounded `i`/`a` insertion and characterwise or linewise Visual edits so the coach can propose a shorter Normal-mode command.
 
-This deliberately excludes vertical-motion preferred-column state initially. Add families only after fixtures pass. A trailing count or operator is incomplete, not a valid episode.
+Blockwise Visual mode and Unicode literal edits remain excluded. A trailing count, operator, find command, change without Escape, or unfinished Visual command is invalid.
 
 Reject Ex commands, shell escapes, expression registers, macros, register execution, dot-repeat, clipboard/register-dependent paste, search, arbitrary `g` commands, file/window operations, model-supplied Lua, and unknown control inputs. Apply the grammar to **both original and candidate** before replay. Source comments and model explanations are untrusted data, including instructions embedded in code.
 
-For insert/change support, literal text must remain data. Use a trusted insertion/paste API after establishing Insert mode, or a rigorously tested literal path. Reject control bytes, Escape, NUL, and unsupported newlines; do not interpret `<...>` text as special-key notation. Generate displayed commands and counts from the same trusted compiler.
+For insert/change support, literal text remains data. The compiler accepts only bounded printable ASCII, establishes Insert mode through an enumerated command, and appends one real Escape token. It rejects control bytes, NUL, and newlines and does not interpret `<...>` text as special-key notation. Displayed commands and counts come from the same trusted compiler.
 
 ### Disposable replay processes
 

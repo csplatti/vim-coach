@@ -6,12 +6,17 @@ authority on whether a candidate reaches the captured target.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
+from worker.contracts import CHANGE_COMMANDS, DELETE_COMMANDS, FIND_COMMANDS
 
-SEMANTIC_MOTIONS = ("w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%")
+ESC = "\x1b"
+SEMANTIC_MOTIONS = (
+    "w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%",
+    "{", "}", "(", ")",
+)
 COUNTABLE_MOTIONS = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E"}
-DELETE_COMMANDS = ("x", "D", "dd", "dw", "diw", "daw")
 FEATURE_PRIORITY = {
     "%": 100,
     "diw": 95,
@@ -24,17 +29,23 @@ FEATURE_PRIORITY = {
     "$": 84,
     "^": 82,
     "0": 80,
-    "W": 72,
-    "B": 72,
-    "E": 72,
+    "W": 77,
+    "B": 77,
+    "E": 77,
     "ge": 72,
     "w": 78,
     "b": 78,
     "e": 78,
     "count": 55,
     "x": 40,
+    "f": 82, "F": 82, "t": 80, "T": 80,
+    "{": 76, "}": 76, "(": 74, ")": 74,
+    'di"': 96, 'da"': 95, "di(": 94, "da(": 93, "di{": 94, "da{": 93,
+    "d$": 92, "d0": 88, "dG": 90, "dgg": 90,
+    "ciw": 98, 'ci"': 98, 'ca"': 97, "ci(": 97, "ca(": 96,
+    "ci{": 97, "ca{": 96, "cw": 90, "C": 92, "r": 90,
 }
-MAX_LOCAL_CANDIDATES = 48
+MAX_LOCAL_CANDIDATES = 64
 
 
 def token_objects(compiled: list[str]) -> list[dict[str, Any]]:
@@ -53,23 +64,34 @@ def token_objects(compiled: list[str]) -> list[dict[str, Any]]:
             tokens.append({"kind": "move", "key": value + compiled[index + 1]})
             index += 2
             continue
-        if value in {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G", "0", "^", "$", "%"}:
+        if value in {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G", "0", "^", "$", "%", "{", "}", "(", ")", ";", ","}:
             tokens.append({"kind": "move", "key": value})
             index += 1
             continue
-        if value in {"x", "D"}:
-            tokens.append({"kind": "delete", "command": value})
-            index += 1
-            continue
-        command = "".join(compiled[index:index + 3])
-        if command in {"diw", "daw"}:
-            tokens.append({"kind": "delete", "command": command})
-            index += 3
-            continue
-        command = "".join(compiled[index:index + 2])
-        if command in {"dd", "dw"}:
-            tokens.append({"kind": "delete", "command": command})
+        if value in FIND_COMMANDS and index + 1 < len(compiled):
+            tokens.append({"kind": "find", "command": value, "target": compiled[index + 1]})
             index += 2
+            continue
+        if value == "r" and index + 1 < len(compiled):
+            tokens.append({"kind": "replace", "target": compiled[index + 1]})
+            index += 2
+            continue
+        change = next((
+            command for command in sorted(CHANGE_COMMANDS, key=len, reverse=True)
+            if compiled[index:index + len(command)] == list(command)
+        ), None)
+        if change is not None and compiled and compiled[-1] == ESC:
+            text_start = index + len(change)
+            tokens.append({"kind": "change", "command": change, "text": "".join(compiled[text_start:-1])})
+            index = len(compiled)
+            continue
+        command = next((
+            command for command in sorted(DELETE_COMMANDS, key=len, reverse=True)
+            if compiled[index:index + len(command)] == list(command)
+        ), None)
+        if command is not None:
+            tokens.append({"kind": "delete", "command": command})
+            index += len(command)
             continue
         return []
     return tokens
@@ -99,7 +121,7 @@ def _compressed_motion_candidate(original: list[str]) -> list[str] | None:
 
 
 def _delete_suffix(original: list[str]) -> list[str] | None:
-    for width in (3, 2, 1):
+    for width in range(3, 0, -1):
         suffix = original[-width:]
         if "".join(suffix) in DELETE_COMMANDS:
             return suffix
@@ -133,6 +155,13 @@ def _feature_for(compiled: list[str]) -> str:
     if any(token.get("kind") == "count" for token in objects):
         return "count"
     for token in objects:
+        if token.get("kind") == "find":
+            return str(token.get("command"))
+        if token.get("kind") == "change":
+            return str(token.get("command"))
+        if token.get("kind") == "replace":
+            return "r"
+    for token in objects:
         if token.get("kind") == "move":
             return str(token.get("key"))
     for token in objects:
@@ -154,9 +183,60 @@ def _candidate(compiled: list[str], *, origin: str) -> dict[str, Any]:
     }
 
 
+def _find_motion_programs(episode: dict[str, Any]) -> Iterable[list[str]]:
+    before = episode.get("before", {})
+    lines = before.get("lines", [])
+    after_row, after_col = _cursor(episode.get("after", {}))
+    if not isinstance(lines, list) or not 1 <= after_row <= len(lines):
+        return
+    line = lines[after_row - 1]
+    if not isinstance(line, str) or not line.isascii():
+        return
+    targets = {
+        "f": after_col,
+        "F": after_col,
+        "t": after_col + 1,
+        "T": after_col - 1,
+    }
+    for command, column in targets.items():
+        if 0 <= column < len(line) and 32 <= ord(line[column]) <= 126:
+            yield [command, line[column]]
+
+
+def _replacement_texts(episode: dict[str, Any]) -> list[str]:
+    before = episode.get("before", {}).get("lines", [])
+    after = episode.get("after", {}).get("lines", [])
+    if not (isinstance(before, list) and isinstance(after, list) and len(before) == len(after) == 1):
+        return []
+    left, right = before[0], after[0]
+    if not isinstance(left, str) or not isinstance(right, str) or not left.isascii() or not right.isascii():
+        return []
+    prefix = 0
+    while prefix < min(len(left), len(right)) and left[prefix] == right[prefix]:
+        prefix += 1
+    suffix = 0
+    while (
+        suffix < len(left) - prefix
+        and suffix < len(right) - prefix
+        and left[-1 - suffix] == right[-1 - suffix]
+    ):
+        suffix += 1
+    inserted = right[prefix:len(right) - suffix if suffix else len(right)]
+    values = {inserted}
+    if len(right) <= 64:
+        values.add(right)
+    _, after_col = _cursor(episode.get("after", {}))
+    for match in re.finditer(r"[A-Za-z0-9_]+", right):
+        if match.start() <= after_col <= match.end():
+            values.add(match.group(0))
+    return sorted(
+        value for value in values
+        if value and len(value) <= 64 and all(32 <= ord(character) <= 126 for character in value)
+    )
+
+
 def _programs(episode: dict[str, Any]) -> Iterable[tuple[list[str], str]]:
     original = episode.get("resolvedTokens", [])
-    original_length = len(original)
     compressed = _compressed_motion_candidate(original)
     if compressed:
         yield compressed, "count-compression"
@@ -167,15 +247,19 @@ def _programs(episode: dict[str, Any]) -> Iterable[tuple[list[str], str]]:
             yield targeted, "cursor-delta"
         for motion in SEMANTIC_MOTIONS:
             yield list(motion), "feature-catalog"
+        for motion in _find_motion_programs(episode):
+            yield motion, "find-target"
         return
 
     suffix = _delete_suffix(original)
-    for command in DELETE_COMMANDS:
+    for command in sorted(DELETE_COMMANDS):
         yield list(command), "feature-catalog"
 
     if suffix:
         for motion in SEMANTIC_MOTIONS:
             yield [*motion, *suffix], "motion-plus-original-action"
+        for motion in _find_motion_programs(episode):
+            yield [*motion, *suffix], "find-plus-original-action"
 
     before = episode.get("before", {}).get("lines", [])
     after = episode.get("after", {}).get("lines", [])
@@ -183,13 +267,24 @@ def _programs(episode: dict[str, Any]) -> Iterable[tuple[list[str], str]]:
         removed = len(str(before[0]).encode()) - len(str(after[0]).encode())
         if 2 <= removed <= 20:
             yield [*str(removed), "x"], "text-delta"
+    elif isinstance(before, list) and isinstance(after, list):
+        removed_lines = len(before) - len(after)
+        if 2 <= removed_lines <= 20:
+            yield [*str(removed_lines), "d", "d"], "line-delta"
 
-    # Anchored edit templates catch common "walk to boundary, then edit"
-    # episodes without attempting an unbounded command search.
-    if original_length >= 4:
-        for anchor in ("0", "^", "$"):
-            for command in DELETE_COMMANDS:
-                yield [anchor, *command], "anchor-plus-action"
+    for replacement in _replacement_texts(episode):
+        for command in sorted(CHANGE_COMMANDS):
+            yield [*command, *replacement, ESC], "change-template"
+
+    if len(before) == len(after) == 1 and len(before[0]) == len(after[0]):
+        differences = [
+            index for index, (left, right) in enumerate(zip(before[0], after[0]))
+            if left != right
+        ]
+        if len(differences) == 1:
+            target = after[0][differences[0]]
+            if target.isascii() and 32 <= ord(target) <= 126:
+                yield ["r", target], "single-character-replace"
 
 
 def generate_local_candidates(episode: dict[str, Any]) -> list[dict[str, Any]]:

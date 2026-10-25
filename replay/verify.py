@@ -33,10 +33,77 @@ def validate_tokens(tokens: Any) -> tuple[bool, str]:
     if any(not isinstance(token, str) or len(token) != 1 for token in tokens):
         return False, "tokens must contain one-character strings"
 
-    motions = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G", "0", "^", "$", "%"}
-    supported = motions | {"g", "x", "D", "d", "i", "a"} | set("123456789")
-    if any(token not in supported for token in tokens):
-        return False, "token is outside the supported grammar"
+    escape = "\x1b"
+    motions = {
+        "h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G",
+        "0", "^", "$", "%", "{", "}", "(", ")", ";", ",",
+    }
+    find_commands = {"f", "F", "t", "T"}
+    text_objects = {"w", '"', "(", "{"}
+
+    def literal(token: str) -> bool:
+        return token != escape and 32 <= ord(token) <= 126
+
+    def insert_tail(index: int) -> tuple[int | None, str]:
+        while index < len(tokens) and tokens[index] != escape:
+            if not literal(tokens[index]):
+                return None, "insert text contains an unsupported input"
+            index += 1
+        if index >= len(tokens):
+            return None, "insert or change command must end with Escape"
+        return index + 1, ""
+
+    def operator_target(index: int) -> tuple[int | None, str]:
+        if index >= len(tokens):
+            return None, "incomplete operator"
+        token = tokens[index]
+        if token in {"i", "a"}:
+            if index + 1 < len(tokens) and tokens[index + 1] in text_objects:
+                return index + 2, ""
+            return None, "unsupported text object"
+        if token == "g" and index + 1 < len(tokens) and tokens[index + 1] == "g":
+            return index + 2, ""
+        if token in {"0", "$", "G", "w"}:
+            return index + 1, ""
+        return None, "unsupported operator target"
+
+    def visual_command(index: int) -> tuple[int | None, str]:
+        index += 1
+        moved = False
+        while index < len(tokens):
+            token = tokens[index]
+            if token in {"d", "x"} and moved:
+                return index + 1, ""
+            if token == "c" and moved:
+                return insert_tail(index + 1)
+            if token in {"i", "a"} and index + 1 < len(tokens) and tokens[index + 1] in text_objects:
+                moved = True
+                index += 2
+                continue
+            if token == "g" and index + 1 < len(tokens) and tokens[index + 1] in {"g", "e"}:
+                moved = True
+                index += 2
+                continue
+            if token in find_commands and index + 1 < len(tokens) and literal(tokens[index + 1]):
+                moved = True
+                index += 2
+                continue
+            if token != "0" and token in set("123456789"):
+                count = 0
+                while index < len(tokens) and _is_digit(tokens[index]):
+                    count = count * 10 + int(tokens[index])
+                    index += 1
+                if count > 20:
+                    return None, "count exceeds the supported limit of 20"
+                if index >= len(tokens):
+                    return None, "incomplete Visual-mode count"
+                token = tokens[index]
+            if token == "0" or token in motions - {"0"}:
+                moved = True
+                index += 1
+                continue
+            return None, "unsupported Visual-mode sequence"
+        return None, "incomplete Visual-mode command"
 
     index = 0
     while index < len(tokens):
@@ -51,26 +118,51 @@ def validate_tokens(tokens: Any) -> tuple[bool, str]:
             return False, "incomplete count or command"
 
         token = tokens[index]
+        if token in {"v", "V"}:
+            index, reason = visual_command(index)
+            if index is None:
+                return False, reason
+            continue
+        if token == "0" or token in motions - {"0"}:
+            index += 1
+            continue
         if token == "g":
             if index + 1 < len(tokens) and tokens[index + 1] in {"g", "e"}:
                 index += 2
                 continue
             return False, "unsupported g motion"
-        if token == "0" or token in motions - {"0"} or token in {"x", "D"}:
+        if token in find_commands:
+            if index + 1 < len(tokens) and literal(tokens[index + 1]):
+                index += 2
+                continue
+            return False, "find motion requires one printable target"
+        if token in {"x", "D"}:
             index += 1
             continue
-        if token != "d":
+        if token == "r":
+            if index + 1 < len(tokens) and literal(tokens[index + 1]):
+                index += 2
+                continue
+            return False, "replace requires one printable character"
+        if token in {"i", "a", "C"}:
+            index, reason = insert_tail(index + 1)
+            if index is None:
+                return False, reason
+            continue
+        if token not in {"d", "c"}:
             return False, "unsupported command sequence"
-
-        if index + 1 >= len(tokens):
-            return False, "incomplete delete operator"
-        operator = tokens[index + 1]
-        if operator in {"d", "w"}:
+        if token == "d" and index + 1 < len(tokens) and tokens[index + 1] == "d":
             index += 2
-        elif operator in {"i", "a"} and index + 2 < len(tokens) and tokens[index + 2] == "w":
-            index += 3
+            continue
+        target_end, reason = operator_target(index + 1)
+        if target_end is None:
+            return False, reason
+        if token == "c":
+            index, reason = insert_tail(target_end)
+            if index is None:
+                return False, reason
         else:
-            return False, "unsupported delete command"
+            index = target_end
 
     return True, ""
 

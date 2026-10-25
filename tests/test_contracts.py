@@ -24,6 +24,32 @@ class ContractTests(unittest.TestCase):
             ["g", "g", "g", "e", "%"],
         )
 
+    def test_compiles_find_text_object_change_and_replace_tokens(self):
+        self.assertEqual(
+            compile_tokens([
+                {"kind": "find", "command": "f", "target": ")"},
+                {"kind": "delete", "command": 'di"'},
+                {"kind": "change", "command": "ciw", "text": "name"},
+                {"kind": "replace", "target": "_"},
+            ]),
+            ["f", ")", "d", "i", '"', "c", "i", "w", "n", "a", "m", "e", "\x1b", "r", "_"],
+        )
+
+    def test_compiles_structural_and_operator_motions(self):
+        self.assertEqual(
+            compile_tokens([
+                {"kind": "move", "key": "}"},
+                {"kind": "delete", "command": "dgg"},
+            ]),
+            ["}", "d", "g", "g"],
+        )
+
+    def test_rejects_control_characters_in_literal_fields(self):
+        with self.assertRaises(ContractError):
+            compile_tokens([{"kind": "find", "command": "f", "target": "\n"}])
+        with self.assertRaises(ContractError):
+            compile_tokens([{"kind": "change", "command": "ciw", "text": "bad\ntext"}])
+
     def test_rejects_unknown_fields(self):
         with self.assertRaises(ContractError):
             validate_response({

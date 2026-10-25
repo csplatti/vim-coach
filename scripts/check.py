@@ -34,6 +34,24 @@ def main() -> int:
     run([
         "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
         "-c", "enew",
+        "-c", "call setline(1, ['abcdef'])",
+        "-c", "normal! vllld",
+        "-c", "sleep 1200m",
+        "-c", "lua local s=require('vim_coach.queue').status(); assert(s.pending == 1, 'Visual-mode episode was not queued')",
+        "-c", "qa!",
+    ])
+    run([
+        "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
+        "-c", "enew",
+        "-c", "call setline(1, ['alpha'])",
+        "-c", 'execute "normal! diwibeta\\<Esc>"',
+        "-c", "sleep 1200m",
+        "-c", "lua local s=require('vim_coach.queue').status(); assert(s.pending == 1, 'change episode was not queued')",
+        "-c", "qa!",
+    ])
+    run([
+        "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
+        "-c", "enew",
         "-c", "call setline(1, ['abcdef ghi'])",
         "-c", "normal! 0",
         "-c", "sleep 1200m",

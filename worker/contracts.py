@@ -11,7 +11,16 @@ SCHEMA_VERSION = 1
 BATCH_SCHEMA_VERSION = 2
 MAX_CANDIDATES = 3
 MAX_TOKENS = 128
-MOVEMENT_KEYS = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%"}
+MOVEMENT_KEYS = {
+    "h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "ge", "gg",
+    "G", "0", "^", "$", "%", "{", "}", "(", ")", ";", ",",
+}
+FIND_COMMANDS = {"f", "F", "t", "T"}
+DELETE_COMMANDS = {
+    "x", "D", "dd", "dw", "diw", "daw", 'di"', 'da"', "di(", "da(",
+    "di{", "da{", "d$", "d0", "dG", "dgg",
+}
+CHANGE_COMMANDS = {"cw", "ciw", 'ci"', 'ca"', "ci(", "ca(", "ci{", "ca{", "C"}
 
 
 class ContractError(ValueError):
@@ -33,6 +42,16 @@ def response_schema() -> dict[str, Any]:
             {
                 "type": "object",
                 "properties": {
+                    "kind": {"enum": ["find"]},
+                    "command": {"enum": sorted(FIND_COMMANDS)},
+                    "target": {"type": "string", "pattern": r"^[ -~]$"},
+                },
+                "required": ["kind", "command", "target"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
                     "kind": {"enum": ["move"]},
                     "key": {"enum": sorted(MOVEMENT_KEYS)},
                 },
@@ -43,9 +62,28 @@ def response_schema() -> dict[str, Any]:
                 "type": "object",
                 "properties": {
                     "kind": {"enum": ["delete"]},
-                    "command": {"enum": ["x", "D", "dd", "dw", "diw", "daw"]},
+                    "command": {"enum": sorted(DELETE_COMMANDS)},
                 },
                 "required": ["kind", "command"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "kind": {"enum": ["change"]},
+                    "command": {"enum": sorted(CHANGE_COMMANDS)},
+                    "text": {"type": "string", "maxLength": 64, "pattern": r"^[ -~]*$"},
+                },
+                "required": ["kind", "command", "text"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "kind": {"enum": ["replace"]},
+                    "target": {"type": "string", "pattern": r"^[ -~]$"},
+                },
+                "required": ["kind", "target"],
                 "additionalProperties": False,
             },
         ]
@@ -97,12 +135,39 @@ def _compile_token(token: dict[str, Any]) -> list[str]:
         if key not in MOVEMENT_KEYS:
             raise ContractError("unsupported movement key")
         return list(key)
+    if kind == "find":
+        command = token.get("command")
+        target = token.get("target")
+        if command not in FIND_COMMANDS or not _is_printable_ascii(target, allow_empty=False, max_length=1):
+            raise ContractError("find requires a supported command and one printable target")
+        return [command, target]
     if kind == "delete":
         command = token.get("command")
-        if command not in {"x", "D", "dd", "dw", "diw", "daw"}:
+        if command not in DELETE_COMMANDS:
             raise ContractError("unsupported delete command")
         return list(command)
+    if kind == "change":
+        command = token.get("command")
+        text = token.get("text")
+        if command not in CHANGE_COMMANDS:
+            raise ContractError("unsupported change command")
+        if not _is_printable_ascii(text, allow_empty=True, max_length=64):
+            raise ContractError("change text must be at most 64 printable ASCII characters")
+        return [*command, *text, "\x1b"]
+    if kind == "replace":
+        target = token.get("target")
+        if not _is_printable_ascii(target, allow_empty=False, max_length=1):
+            raise ContractError("replace requires one printable target")
+        return ["r", target]
     raise ContractError("unknown token kind")
+
+
+def _is_printable_ascii(value: Any, *, allow_empty: bool, max_length: int) -> bool:
+    if not isinstance(value, str) or len(value) > max_length:
+        return False
+    if not value and not allow_empty:
+        return False
+    return all(32 <= ord(character) <= 126 for character in value)
 
 
 def compile_tokens(tokens: Any) -> list[str]:
@@ -116,11 +181,14 @@ def compile_tokens(tokens: Any) -> list[str]:
         required = {
             "count": {"kind", "value"},
             "move": {"kind", "key"},
+            "find": {"kind", "command", "target"},
             "delete": {"kind", "command"},
+            "change": {"kind", "command", "text"},
+            "replace": {"kind", "target"},
         }.get(kind)
         if required is None:
             raise ContractError(
-                f"token {index} has unknown kind {kind!r}; expected count, move, or delete"
+                f"token {index} has unknown kind {kind!r}; expected count, move, find, delete, change, or replace"
             )
         _require_exact_keys(token, required, f"token {index}")
         compiled.extend(_compile_token(token))
@@ -167,7 +235,7 @@ def validate_response(value: Any) -> list[dict[str, Any]]:
 def _normalize_token(token: Any) -> Any:
     """Normalize harmless provider naming variants before strict validation."""
     movements = MOVEMENT_KEYS
-    deletes = {"x", "D", "dd", "dw", "diw", "daw"}
+    deletes = DELETE_COMMANDS
     if isinstance(token, str):
         if token in movements:
             return {"kind": "move", "key": token}
@@ -185,12 +253,14 @@ def _normalize_token(token: Any) -> Any:
         "navigation": "move",
         "navigate": "move",
         "key": "move",
+        "search": "find",
         "repeat": "count",
         "deletion": "delete",
         "remove": "delete",
+        "replacement": "replace",
     }
     kind = aliases.get(kind, kind)
-    known_fields = {"kind", "type", "key", "command", "value", "count"}
+    known_fields = {"kind", "type", "key", "command", "value", "count", "target", "text"}
     if not set(token).issubset(known_fields):
         return token
 
@@ -217,6 +287,23 @@ def _normalize_token(token: Any) -> Any:
         if command is None:
             return token
         return {"kind": "delete", "command": command}
+    if kind == "find":
+        command = matching_value("command", "key")
+        target = matching_value("target", "value")
+        if command is None or target is None:
+            return token
+        return {"kind": "find", "command": command, "target": target}
+    if kind == "change":
+        command = matching_value("command", "key")
+        text = matching_value("text", "value")
+        if command is None or text is None:
+            return token
+        return {"kind": "change", "command": command, "text": text}
+    if kind == "replace":
+        target = matching_value("target", "value", "key")
+        if target is None:
+            return token
+        return {"kind": "replace", "target": target}
     return token
 
 

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from replay.verify import verify, verify_many
+from replay.verify import validate_tokens, verify, verify_many
 
 
 class ReplayVerificationTests(unittest.TestCase):
@@ -74,6 +74,14 @@ class ReplayVerificationTests(unittest.TestCase):
         self.assertTrue(result["accepted"])
         self.assertFalse(result["registersEqual"])
         self.assertEqual(result["comparisonPolicy"], "editing-outcome")
+
+    def test_accepts_bounded_visual_edit_sequences(self):
+        self.assertEqual(validate_tokens(list("vllld")), (True, ""))
+        self.assertEqual(validate_tokens(list("Vjd")), (True, ""))
+        self.assertEqual(validate_tokens(["v", "i", '"', "c", "x", "\x1b"]), (True, ""))
+        valid, reason = validate_tokens(list("vlll"))
+        self.assertFalse(valid)
+        self.assertIn("incomplete Visual-mode", reason)
 
 
 if __name__ == "__main__":

@@ -15,10 +15,11 @@ Each manual sync analyzes every episode currently waiting in the queue.
 Navigation analysis prefers unseen semantic motions over another example of
 an already introduced count.
 
-The current curated feature catalog contains 24 replay-supported help topics:
-counts; `h/j/k/l`; word and WORD motions; `ge`; `gg/G`; `0/^/$`; `%`; and the
-bounded deletion forms `x`, `D`, `dd`, `dw`, `diw`, and `daw`. The installed
-Neovim runtime has thousands of help tags, so this catalog is intentionally a
+The current curated feature catalog contains 54 replay-supported help topics.
+It includes counts; basic, word, line, file, pair, sentence, and paragraph
+motions; character-find motions; word, quote, parenthesis, and brace text
+objects; bounded delete/change operators; and single-character replacement.
+The installed Neovim runtime has thousands of help tags, so this remains a
 safe subset rather than a claim of full Vim coverage.
 
 Recommendation discovery is hybrid. A local catalog generator creates bounded
@@ -213,7 +214,7 @@ To measure deterministic catalog coverage without a provider request:
 python3 scripts/evaluate_coach.py --local-only
 ```
 
-The checked-in 21-scenario corpus currently verifies all 21 expected targets
+The checked-in 39-scenario corpus currently verifies all 39 expected targets
 under the coaching outcome policy. This is curated grammar coverage, not a
 claim about all of Vim.
 
@@ -283,12 +284,13 @@ status remains polled for the short-lived loading indicator.
 
 ## Current limits
 
-The finished prototype is intentionally narrow: one native Neovim profile,
-ordinary file buffers, bounded Normal-mode motion/deletion commands, and
-in-memory episode state. Visual mode, insert/change proposals, mappings,
-macros, search, paste, cross-file edits, and VSCodeVim integration remain
-future work. The replay child is a deterministic process, not a general OS
-security sandbox.
+The finished prototype is intentionally bounded: one native Neovim profile,
+ordinary file buffers, printable ASCII literal edits, and a curated command
+grammar. It captures Normal and Insert mode plus bounded characterwise and
+linewise Visual edits. Blockwise Visual mode, arbitrary mappings, macros,
+pattern search, paste/register execution, cross-file edits, Unicode literal
+changes, and VSCodeVim integration remain future work. The replay child is a
+deterministic process, not a general OS security sandbox.
 
 ## Next architecture: batch review app
 

@@ -83,6 +83,12 @@ class VimHelpTests(unittest.TestCase):
             self.assertEqual(lesson["concept"], "Move to the end of a word")
             self.assertEqual(lesson["helpTag"], "e")
 
+    def test_catalog_exposes_advanced_token_shapes(self):
+        catalog = {item["helpTag"]: item for item in feature_catalog(Path("/missing"))}
+        self.assertEqual(catalog["f"]["token"]["kind"], "find")
+        self.assertEqual(catalog['ci"']["token"]["kind"], "change")
+        self.assertEqual(catalog["r"]["token"], {"kind": "replace", "target": "{char}"})
+
 
 if __name__ == "__main__":
     unittest.main()

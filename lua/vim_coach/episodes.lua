@@ -63,7 +63,7 @@ local function suppress_until_idle(reason)
 end
 
 local function mode_is_supported(mode)
-  return mode == "n" or mode:sub(1, 2) == "no"
+  return mode == "n" or mode == "i" or mode == "v" or mode == "V" or mode:sub(1, 2) == "no"
 end
 
 local function current_context_matches()
@@ -74,6 +74,8 @@ local function current_context_matches()
     and state.current.window_id == vim.api.nvim_get_current_win()
     and mode_is_supported(vim.api.nvim_get_mode().mode)
 end
+
+local schedule_finish
 
 local function finish(generation)
   if not state.running or not state.current or generation ~= state.generation then
@@ -87,7 +89,12 @@ local function finish(generation)
   end
 
   if vim.api.nvim_get_mode().mode ~= "n" then
-    clear_current("episode did not settle in Normal mode")
+    local elapsed_ms = (now_ns() - state.current.started_at) / 1000000
+    if elapsed_ms >= state.config.max_episode_ms then
+      clear_current("episode did not return to Normal mode before the time limit")
+    else
+      schedule_finish()
+    end
     return
   end
 
@@ -149,7 +156,7 @@ local function finish(generation)
   end
 end
 
-local function schedule_finish()
+schedule_finish = function()
   cancel_idle_timer()
   local generation = state.generation
   state.idle_timer = vim.defer_fn(function()

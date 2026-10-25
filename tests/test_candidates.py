@@ -52,6 +52,51 @@ class CandidateGenerationTests(unittest.TestCase):
         merged = merge_candidates([episode], provider)[0]["candidates"]
         self.assertEqual(sum(item["compiledTokens"] == ["w"] for item in merged), 1)
 
+    def test_generates_find_motion_from_target_cursor(self):
+        episode = {
+            "kind": "navigation",
+            "resolvedTokens": list("llll"),
+            "before": {
+                "lines": ["alpha beta"],
+                "cursor": {"row1Based": 1, "byteColumn0Based": 0},
+            },
+            "after": {"cursor": {"row1Based": 1, "byteColumn0Based": 4}},
+        }
+        compiled = [item["compiledTokens"] for item in generate_local_candidates(episode)]
+        self.assertIn(["f", "a"], compiled)
+
+    def test_generates_change_and_replace_candidates_from_text_delta(self):
+        change_episode = {
+            "kind": "edit",
+            "resolvedTokens": ["d", "i", "w", "i", *list("beta"), "\x1b"],
+            "before": {"lines": ["alpha"]},
+            "after": {"lines": ["beta"]},
+        }
+        changes = generate_local_candidates(change_episode)
+        self.assertIn(
+            ["c", "i", "w", *list("beta"), "\x1b"],
+            [item["compiledTokens"] for item in changes],
+        )
+
+        replace_episode = {
+            "kind": "edit",
+            "resolvedTokens": ["x", "i", "Z", "\x1b"],
+            "before": {"lines": ["abc"]},
+            "after": {"lines": ["aZc"]},
+        }
+        replacements = generate_local_candidates(replace_episode)
+        self.assertIn(["r", "Z"], [item["compiledTokens"] for item in replacements])
+
+    def test_generates_normal_mode_replacement_for_visual_delete(self):
+        episode = {
+            "kind": "edit",
+            "resolvedTokens": list("vllld"),
+            "before": {"lines": ["abcdef"]},
+            "after": {"lines": ["ef"]},
+        }
+        compiled = [item["compiledTokens"] for item in generate_local_candidates(episode)]
+        self.assertIn(["4", "x"], compiled)
+
 
 if __name__ == "__main__":
     unittest.main()

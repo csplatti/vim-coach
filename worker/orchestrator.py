@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from replay.verify import verify_many
@@ -111,6 +112,48 @@ def _record_rejection(
     })
 
 
+def _contextual_priority(candidate: dict[str, Any], episode: dict[str, Any]) -> int:
+    feature = _candidate_feature(candidate)
+    priority = int(candidate.get("_rankingPriority", FEATURE_PRIORITY.get(feature, 0)))
+    origin = candidate.get("_origin")
+    if origin == "motion-plus-original-action":
+        priority -= 30
+    elif origin == "find-plus-original-action":
+        priority -= 15
+    if feature == "x" and candidate.get("compiledTokens") == ["x"]:
+        priority += 50
+
+    before = episode.get("before", {})
+    after = episode.get("after", {})
+    lines = before.get("lines", [])
+    cursor = before.get("cursor", {})
+    row = int(cursor.get("row1Based", 1))
+    line = lines[row - 1] if isinstance(lines, list) and 1 <= row <= len(lines) else ""
+    delimiter = {
+        'di"': '"', 'da"': '"',
+        "di(": "(", "da(": "(",
+        "di{": "{", "da{": "{",
+        'ci"': '"', 'ca"': '"',
+        "ci(": "(", "ca(": "(",
+        "ci{": "{", "ca{": "{",
+    }.get(feature)
+    if delimiter and isinstance(line, str) and delimiter in line:
+        priority += 120
+
+    before_cursor = before.get("cursor", {})
+    after_cursor = after.get("cursor", {})
+    if feature in {"(", ")"} and isinstance(line, str):
+        left = min(int(before_cursor.get("byteColumn0Based", 0)), int(after_cursor.get("byteColumn0Based", 0)))
+        right = max(int(before_cursor.get("byteColumn0Based", 0)), int(after_cursor.get("byteColumn0Based", 0)))
+        if re.search(r"[.!?](?:\s|$)", line[left:right + 1]):
+            priority += 60
+    if feature in {"{", "}"}:
+        row_delta = abs(int(before_cursor.get("row1Based", 1)) - int(after_cursor.get("row1Based", 1)))
+        if row_delta >= 2:
+            priority += 60
+    return priority
+
+
 def verify_candidates(
     episode: dict[str, Any],
     candidates: list[dict[str, Any]],
@@ -186,8 +229,8 @@ def verify_candidates(
             if int(profile.get(_candidate_feature(item), {}).get("exposures", 0)) == 0
         ]
     verified.sort(key=lambda item: (
+        -(item["savedLogicalKeys"] * 30 + _contextual_priority(item, episode)),
         -item["savedLogicalKeys"],
-        -item.get("_rankingPriority", 0),
         item["candidateLogicalKeys"],
     ))
     return verified[:3]
