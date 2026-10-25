@@ -107,13 +107,28 @@ local function finish(generation)
     return
   end
 
-  if snapshot.same_text(state.current.before, after) then
-    clear_current("navigation without a text change")
-    return
+  local text_changed = not snapshot.same_text(state.current.before, after)
+  local cursor_changed = not vim.deep_equal(state.current.before.cursor, after.cursor)
+  local episode_kind = "edit"
+  if not text_changed then
+    if not cursor_changed then
+      clear_current("episode produced no text or cursor change")
+      return
+    end
+    if not grammar.is_navigation_only(state.current.resolved_tokens) then
+      clear_current("text-preserving episode contains a non-navigation command")
+      return
+    end
+    if #state.current.resolved_tokens < (state.config.min_navigation_keys or 4) then
+      clear_current("navigation episode is below the coaching threshold")
+      return
+    end
+    episode_kind = "navigation"
   end
 
   local episode = {
     id = state.next_id,
+    kind = episode_kind,
     generation = state.generation,
     before = state.current.before,
     after = after,

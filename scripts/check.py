@@ -31,6 +31,17 @@ def main() -> int:
         "-c", "VimCoachPracticeCheck",
         "-c", "qa!",
     ])
+    run([
+        "nvim", "--headless", "-u", "demo/minimal.lua", "-i", "NONE", "-n",
+        "-c", "enew",
+        "-c", "call setline(1, ['abcdef ghi'])",
+        "-c", "normal! 0",
+        "-c", "sleep 1200m",
+        "-c", "normal! llll",
+        "-c", "sleep 1200m",
+        "-c", "lua assert(require('vim_coach.queue').status().pending == 1, 'navigation episode was not queued')",
+        "-c", "qa!",
+    ])
     run(["nvim", "--headless", "-u", "demo/suggestion.lua", "-i", "NONE", "-n", "+VimCoachStatus", "+VimCoachDismiss", "+qa!"])
     print("Offline checks passed.")
     return 0

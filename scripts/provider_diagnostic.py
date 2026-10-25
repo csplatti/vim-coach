@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnose Bitdeer auth, model access, balance, and response-format support."""
+"""Diagnose a Modal/OpenAI-compatible inference endpoint."""
 
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-DEFAULT_BASE_URL = "https://api-inference.bitdeer.ai/v1"
+DEFAULT_BASE_URL = "https://inference.us-west.modal.direct/v1"
+DEFAULT_MODEL = "auto"
 RESPONSE_HEADERS = ("x-request-id", "x-trace-id", "cf-ray", "content-type")
 
 
@@ -84,8 +85,8 @@ def diagnosis(status: int | None, body: Any) -> str:
     if status == 403:
         code = body.get("error", {}).get("code") if isinstance(body, dict) else None
         if code == "NOT_ENOUGH_BALANCE":
-            return "Bitdeer reports insufficient account balance."
-        return "Bitdeer refused the request: check balance, API-key permissions, or model access."
+            return "The provider reports insufficient balance or access."
+        return "The provider refused the request: check token permissions or model access."
     if status == 404:
         return "The endpoint or model was not found; verify the exact model ID."
     if status == 400:
@@ -105,13 +106,15 @@ def print_result(label: str, result: dict[str, Any]) -> None:
     print("diagnosis:", diagnosis(result["status"], result["body"]))
 
 
-def chat_body(model: str, mode: str) -> dict[str, Any]:
+def chat_body(model: str, mode: str, max_tokens: int | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": "Reply with one short sentence: API diagnostic passed."}],
         "stream": False,
-        "max_tokens": 64,
+        "reasoning_effort": "low",
     }
+    if max_tokens is not None:
+        body["max_tokens"] = max_tokens
     if mode == "json_object":
         body["messages"] = [{"role": "user", "content": "Return exactly JSON: {\"ok\":true}."}]
         body["response_format"] = {"type": "json_object"}
@@ -136,33 +139,41 @@ def chat_body(model: str, mode: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--base-url", default=os.environ.get("BITDEER_BASE_URL", DEFAULT_BASE_URL))
-    parser.add_argument("--model", default=None)
     parser.add_argument("--mode", choices=["models", "basic", "json_object", "json_schema", "all"], default="models")
     args = parser.parse_args()
 
     load_env_file(args.env_file)
-    api_key = os.environ.get("BITDEER_API_KEY", "")
-    model = args.model or os.environ.get("BITDEER_MODEL", "")
+    api_key = os.environ.get("MODAL_API_KEY", "")
+    model = DEFAULT_MODEL
+    max_tokens = None
+    if os.environ.get("LLM_MAX_OUTPUT_TOKENS"):
+        max_tokens = int(os.environ["LLM_MAX_OUTPUT_TOKENS"])
     if not api_key:
-        parser.error("BITDEER_API_KEY is missing; use --env-file or export it")
+        parser.error("MODAL_API_KEY is missing; use --env-file or export it")
 
-    base_url = args.base_url.rstrip("/")
-    print("Bitdeer diagnostic")
+    base_url = os.environ.get("MODAL_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    print("Modal/provider diagnostic")
     print("base URL:", base_url)
     print("API key:", "loaded (value hidden)")
-    print("model:", model or "not requested")
+    print("model: auto-discovered from /v1/models")
 
     modes = ["models"] if args.mode == "models" else (["basic", "json_object", "json_schema"] if args.mode == "all" else [args.mode])
-    if not model and args.mode != "models":
-        from worker.bitdeer import BitdeerClient, BitdeerConfig
-        model = BitdeerClient(BitdeerConfig(api_key=api_key))._model()
-        print("auto-selected model:", model)
+    if args.mode != "models":
+        models_result = request_json("GET", base_url + "/models", api_key)
+        print_result("models", models_result)
+        if models_result["status"] != 200:
+            return 1
+        if isinstance(models_result["body"], dict):
+            data = models_result["body"].get("data", [])
+            model_ids = [item.get("id") for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
+            if model_ids:
+                model = model_ids[0]
+                print("using discovered endpoint:", model)
     for mode in modes:
         if mode == "models":
             result = request_json("GET", base_url + "/models", api_key)
         else:
-            result = request_json("POST", base_url + "/chat/completions", api_key, chat_body(model, mode))
+            result = request_json("POST", base_url + "/chat/completions", api_key, chat_body(model, mode, max_tokens))
         print_result(mode, result)
     return 0
 

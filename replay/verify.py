@@ -18,6 +18,11 @@ MAX_OUTPUT_BYTES = 32 * 1024
 DEFAULT_TIMEOUT_SECONDS = 1.0
 
 
+def _nvim_executable() -> str:
+    """Return the replay executable without mistaking Neovim's server socket for it."""
+    return os.environ.get("VIM_COACH_NVIM", "nvim")
+
+
 def _is_digit(token: Any) -> bool:
     return isinstance(token, str) and len(token) == 1 and token.isdigit()
 
@@ -28,8 +33,8 @@ def validate_tokens(tokens: Any) -> tuple[bool, str]:
     if any(not isinstance(token, str) or len(token) != 1 for token in tokens):
         return False, "tokens must contain one-character strings"
 
-    motions = {"h", "l", "w", "b", "e", "0", "^", "$"}
-    supported = motions | {"x", "D", "d", "i", "a"} | set("123456789")
+    motions = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "G", "0", "^", "$", "%"}
+    supported = motions | {"g", "x", "D", "d", "i", "a"} | set("123456789")
     if any(token not in supported for token in tokens):
         return False, "token is outside the supported grammar"
 
@@ -46,6 +51,11 @@ def validate_tokens(tokens: Any) -> tuple[bool, str]:
             return False, "incomplete count or command"
 
         token = tokens[index]
+        if token == "g":
+            if index + 1 < len(tokens) and tokens[index + 1] in {"g", "e"}:
+                index += 2
+                continue
+            return False, "unsupported g motion"
         if token == "0" or token in motions - {"0"} or token in {"x", "D"}:
             index += 1
             continue
@@ -68,7 +78,7 @@ def validate_tokens(tokens: Any) -> tuple[bool, str]:
 def _run_child(before: dict[str, Any], tokens: list[str], timeout: float) -> dict[str, Any]:
     payload = {"schemaVersion": 1, "before": before, "tokens": tokens}
     command = [
-        os.environ.get("NVIM", "nvim"),
+        _nvim_executable(),
         "--headless",
         "-u",
         "NONE",
@@ -79,6 +89,9 @@ def _run_child(before: dict[str, Any], tokens: list[str], timeout: float) -> dic
         "-c",
         "lua dofile('replay/runner.lua')",
     ]
+    child_env = {**os.environ, "TMPDIR": "/private/tmp"}
+    child_env.pop("NVIM", None)
+    child_env.pop("NVIM_LISTEN_ADDRESS", None)
     process = subprocess.Popen(
         command,
         cwd=ROOT,
@@ -86,7 +99,7 @@ def _run_child(before: dict[str, Any], tokens: list[str], timeout: float) -> dic
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
-        env={**os.environ, "TMPDIR": "/private/tmp"},
+        env=child_env,
     )
     try:
         stdout, stderr = process.communicate(
@@ -149,8 +162,24 @@ def verify(payload: dict[str, Any]) -> dict[str, Any]:
     candidate_state = _run_child(before, candidate, DEFAULT_TIMEOUT_SECONDS)
     candidate_latency_ms = round((time.monotonic() - started) * 1000, 2)
 
-    original_matches = _state_projection(original_state) == _state_projection(expected_after)
-    candidate_matches = _state_projection(candidate_state) == _state_projection(expected_after)
+    expected_projection = _state_projection(expected_after)
+    original_projection = _state_projection(original_state)
+    candidate_projection = _state_projection(candidate_state)
+    primary_fields = ("lines", "finalNewline", "cursor", "mode")
+    original_mismatch_fields = [
+        key for key in primary_fields if original_projection.get(key) != expected_projection.get(key)
+    ]
+    candidate_mismatch_fields = [
+        key for key in primary_fields if candidate_projection.get(key) != expected_projection.get(key)
+    ]
+    # Register snapshots captured in the live editor are not reliably
+    # reconstructible in a fresh child because restoring numbered registers can
+    # itself alter register state. Compare candidate side effects with the
+    # original replay instead; both runs start from the same reconstructed state.
+    if candidate_projection.get("trackedRegisters") != original_projection.get("trackedRegisters"):
+        candidate_mismatch_fields.append("trackedRegisters")
+    original_matches = not original_mismatch_fields
+    candidate_matches = not candidate_mismatch_fields
     original_count = len(original)
     candidate_count = len(candidate)
     saved = original_count - candidate_count
@@ -168,6 +197,8 @@ def verify(payload: dict[str, Any]) -> dict[str, Any]:
         "accepted": reason is None,
         "originalReplayMatches": original_matches,
         "candidateReplayMatches": candidate_matches,
+        "originalMismatchFields": original_mismatch_fields,
+        "candidateMismatchFields": candidate_mismatch_fields,
         "originalLogicalKeys": original_count,
         "candidateLogicalKeys": candidate_count,
         "savedLogicalKeys": saved,

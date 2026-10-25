@@ -28,9 +28,13 @@ command("VimCoachAnalyze", function()
   coach.analyze()
 end, "Analyze the latest captured episode")
 
+command("VimCoachSync", function()
+  coach.sync()
+end, "Send queued Vim Coach episodes as one batch")
+
 command("VimCoachLesson", function()
   coach.lesson()
-end, "Open the available Vim Coach lesson")
+end, "Show the Vim Coach review inbox status")
 
 command("VimCoachDismiss", function()
   coach.dismiss()

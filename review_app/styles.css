@@ -1,0 +1,28 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+body { margin: 0; padding: 36px; background: #111318; color: #eef1f7; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.eyebrow { margin: 0 0 8px; color: #8ea7ff; font-size: 12px; letter-spacing: .16em; }
+h1 { margin: 0; font-size: 32px; }
+h2 { margin: 12px 0; font-size: 19px; }
+p { color: #aeb6c7; line-height: 1.5; }
+#batch-status { min-height: 22px; margin-top: 12px; font-size: 13px; }
+.batch-idle { color: #8f99ac; }
+.batch-complete { color: #91d5ae; }
+.batch-error { color: #ff9e9e; max-width: 520px; }
+.loading { display: flex; align-items: center; gap: 10px; color: #b9c8ff; }
+.loading-spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid #2a3040; border-top-color: #8ea7ff; border-radius: 50%; animation: loading-spin .8s linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+button { border: 0; border-radius: 8px; padding: 10px 14px; background: #8ea7ff; color: #111318; cursor: pointer; font-weight: 600; }
+button:disabled { opacity: .42; cursor: not-allowed; }
+button.secondary { background: #2a3040; color: #eef1f7; }
+.card, .empty { max-width: 680px; margin-bottom: 18px; padding: 22px; border: 1px solid #2c3342; border-radius: 14px; background: #181c25; }
+.card-top, .actions { display: flex; align-items: center; gap: 10px; }
+.card-top { justify-content: space-between; color: #8f99ac; font-size: 13px; }
+.tag { color: #b9c8ff; }
+.lesson-intro { margin-bottom: 16px; }
+.sequence { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border-radius: 8px; background: #0c0e13; }
+.sequence span { color: #8f99ac; font-size: 13px; }
+.help-link { font-size: 13px; }
+code { color: #d6ddff; }
+.scope { font-size: 13px; }
+.actions { margin-top: 20px; flex-wrap: wrap; }

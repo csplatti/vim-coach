@@ -24,12 +24,12 @@ function M.cancel()
   end
 end
 
-function M.request(episode)
+local function start_request(request)
   if not state.config or not state.config.cloud_enabled then
     return false, "cloud analysis is disabled"
   end
-  if type(episode) ~= "table" then
-    return false, "no episode is available"
+  if type(request) ~= "table" then
+    return false, "invalid batch request"
   end
 
   M.cancel()
@@ -48,12 +48,16 @@ function M.request(episode)
     end
   end
   local output = {}
+  local worker_env = { TMPDIR = "/private/tmp" }
+  if state.config.debug_prompt then
+    worker_env.VIM_COACH_DEBUG_PROMPT = "1"
+  end
   local job = vim.fn.jobstart(command, {
     cwd = worker_cwd,
     stdin = "pipe",
     stdout = "pipe",
     stderr = "pipe",
-    env = { TMPDIR = "/private/tmp" },
+    env = worker_env,
     stdout_buffered = true,
     on_stdout = function(_, data)
       if data then
@@ -82,7 +86,7 @@ function M.request(episode)
         notify(result.error or "analysis worker failed", vim.log.levels.WARN)
         return
       end
-      if result.episodeId ~= nil and result.episodeId ~= episode.id then
+      if request.batchId ~= nil and result.batchId ~= nil and result.batchId ~= request.batchId then
         return
       end
       if state.on_result then
@@ -95,15 +99,30 @@ function M.request(episode)
   end
 
   state.job = job
-  local request = vim.fn.json_encode({
-    schemaVersion = 1,
-    cloudEnabled = true,
-    episodeId = episode.id,
-    episode = episode,
-  })
-  vim.fn.chansend(job, request)
+  local encoded = vim.fn.json_encode(request)
+  vim.fn.chansend(job, encoded)
   vim.fn.chanclose(job, "stdin")
   return true
+end
+
+function M.request_batch(episodes)
+  if type(episodes) ~= "table" or #episodes == 0 then
+    return false, "no episodes are queued"
+  end
+  local batch_id = tostring(os.time()) .. "-" .. tostring(#episodes)
+  return start_request({
+    schemaVersion = 2,
+    cloudEnabled = true,
+    batchId = batch_id,
+    episodes = episodes,
+  })
+end
+
+function M.request(episode)
+  if type(episode) ~= "table" then
+    return false, "no episode is available"
+  end
+  return M.request_batch({ episode })
 end
 
 function M.status()

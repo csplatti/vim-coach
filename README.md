@@ -4,6 +4,23 @@ Vim Coach is a native Neovim prototype that will capture supported editing
 episodes, suggest shorter Vim sequences, verify them by replay, and teach them
 through a scratch-buffer drill.
 
+The intended product direction is now a **batch review coach**: Neovim stays
+quiet while you work, episodes are analyzed in batches, and verified lessons
+appear in a separate review app rather than inline in the editor.
+
+The recorder captures both edits and inefficient motion-only episodes. By
+default, navigation must contain at least four supported keys and move the
+cursor before it is queued, avoiding coaching for every ordinary movement.
+Each manual sync analyzes every episode currently waiting in the queue.
+Navigation analysis prefers unseen semantic motions over another example of
+an already introduced count.
+
+The current curated feature catalog contains 24 replay-supported help topics:
+counts; `h/j/k/l`; word and WORD motions; `ge`; `gg/G`; `0/^/$`; `%`; and the
+bounded deletion forms `x`, `D`, `dd`, `dw`, `diw`, and `daw`. The installed
+Neovim runtime has thousands of help tags, so this catalog is intentionally a
+safe subset rather than a claim of full Vim coverage.
+
 ## Development baseline
 
 The current development machine has:
@@ -65,34 +82,39 @@ The child receives structured JSON and a validated token array only. It does
 not execute model-provided Lua, Ex commands, shell commands, or arbitrary
 source text.
 
-## Bitdeer proposal worker
+## Modal proposal worker
 
-Step 4 adds an opt-in local worker. Bitdeer uses the documented OpenAI-
-compatible base URL and bearer authentication. Configure credentials locally,
-outside Git:
+Step 4 adds an opt-in local worker using Modal's OpenAI-compatible endpoint.
+Configure credentials locally, outside Git:
 
 ```sh
-export BITDEER_API_KEY='...'
+export MODAL_API_KEY='...'
+export MODAL_BASE_URL='https://inference.us-west.modal.direct/v1'
 ```
 
-`BITDEER_MODEL` is optional. If omitted, the worker calls `/models` and
-selects a preferred text model automatically, starting with
-`deepseek-ai/DeepSeek-V4-Flash`. Set `BITDEER_MODEL` only when you want to
-override that choice.
+Copy `.env.example` to `.env` and replace the placeholder token and endpoint
+URL from Modal's request example. `MODAL_BASE_URL` is used exactly as provided;
+it should be the API base URL, not a specific `/models` or `/chat/completions`
+request URL. Modal Shared Endpoints use a proxy token; the worker discovers the
+available endpoint/model automatically.
+`LLM_MAX_OUTPUT_TOKENS`, `LLM_MAX_RETRIES`, and `LLM_TIMEOUT_SECONDS` are all
+optional. When absent, the worker does not impose those project-level limits
+and leaves the provider client defaults in effect.
 
 The worker refuses requests unless the input contains `cloudEnabled: true`.
 It sends only minimized before/after text, cursor state, allowed grammar, and
 the original token sequence; registers, paths, and unrelated editor state stay
 local. Responses are validated and compiled locally before replay verification.
 
-No live provider request is made by the test suite. To discover models after
-explicit approval, use the client from a controlled Python session:
+No live provider request is made by the test suite. To test the configured
+endpoint after explicit approval, use the client from a controlled Python
+session:
 
 ```python
-from worker.bitdeer import BitdeerClient, BitdeerConfig
+from worker.provider import LLMClient, LLMConfig
 
-client = BitdeerClient(BitdeerConfig.from_env(cloud_enabled=True))
-print(client.list_models())
+client = LLMClient(LLMConfig.from_env(cloud_enabled=True))
+print(client._model())  # auto
 ```
 
 Then the JSON worker accepts an episode on stdin:
@@ -105,16 +127,35 @@ printf '%s' '{"schemaVersion":1,"cloudEnabled":true,"episode":{}}' \
 The empty episode above is expected to fail locally; it is only a transport
 smoke test and does not upload anything without valid credentials.
 
-## Suggestion card
+## Current batch-review prototype
 
-Step 5 adds a single floating suggestion card for proposals that have already
-passed local replay verification. The card shows the original and candidate
-logical-key counts, the explanation, and only the comparison scope actually
-reported by verification. Use `:VimCoachLesson` to reopen it,
-`:VimCoachDismiss` to start the cooldown, or `:VimCoachKnow` to suppress the
-concept in the current session. The Bitdeer worker is not automatically
-called yet; a future integration will pass its verified result to
-`require("vim_coach").show_suggestion(...)`.
+Captured edits now enter a bounded in-memory queue. They do not trigger a
+provider request or an inline card. Use `:VimCoachStatus` to see the pending
+count, then `:VimCoachSync` to send up to five queued episodes in one worker
+request. The worker validates the batch response, replay-verifies each
+candidate, and keeps only verified lesson records in memory.
+
+The batch worker also writes verified lesson metadata to
+`~/.local/state/vim-coach/lessons.json` (or `VIM_COACH_HISTORY_FILE` when set).
+Each review card introduces one reusable Vim feature with a feature title, a
+concise excerpt from the installed Neovim runtime documentation, an example
+binding, and the corresponding `:help` tag. AI prose is discarded before the
+lesson is persisted, so lessons do not critique or narrate the user's edit.
+The installed help catalog is also included in model context. For navigation,
+the worker supplements model proposals with safe one-key semantic motions and
+accepts them only when local replay proves exact cursor and text equivalence.
+Raw before/after buffer snapshots are not persisted by default.
+
+Use `:VimCoachLesson` to see how many lessons are ready. Neovim does not yet
+launch or push to the review app automatically, so the old inline card remains
+only as a legacy demo fixture (`demo/suggestion.lua`) and is not used by
+automatic capture.
+
+The first review-app shell is in `review_app/`. From that directory, run
+`npm install` once and then `npm start`. It reads the same history file and
+supports review, dismiss, I Know, reset, and an indeterminate loading bar while
+the worker evaluates a batch. Practice is intentionally marked as the next
+step because raw practice snapshots are not persisted.
 
 ## Practice drill
 
@@ -139,17 +180,27 @@ Run the complete offline check before recording a demo:
 python3 scripts/check.py
 ```
 
-To diagnose Bitdeer without printing the API key, run the model-list check:
+Run the live coverage harness to generate, batch, and replay-verify navigation
+and editing scenarios without typing them manually:
 
 ```sh
-python3 scripts/bitdeer_diagnostic.py --env-file .env --mode models
+python3 scripts/evaluate_coach.py
 ```
 
-To compare the plain chat request, legacy JSON mode, and strict JSON Schema
-mode, run this explicitly. It makes three inference requests:
+This makes one provider batch request and reports proposed, verified, rejected,
+and expected bindings for each scenario.
+
+To diagnose the Modal/provider endpoint without printing the API key, run:
 
 ```sh
-python3 scripts/bitdeer_diagnostic.py --env-file .env --mode all
+python3 scripts/provider_diagnostic.py --env-file .env --mode basic
+```
+
+To compare plain chat and JSON response modes, run this explicitly. It makes
+three inference requests:
+
+```sh
+python3 scripts/provider_diagnostic.py --env-file .env --mode all
 ```
 
 The output includes the provider response body, request IDs, latency, and a
@@ -159,11 +210,11 @@ bug report.
 The worker now sends each provider candidate through the replay verifier and
 returns only verified, strictly shorter candidates. Provider failures,
 timeouts, malformed candidates, and replay mismatches fail closed. A live
-Bitdeer smoke request still requires your explicit approval, API key, model,
-and spending limit; it has not been run from this checkout.
+Modal request requires explicit opt-in, an API token, and an approved
+spending limit; the test suite never makes live requests.
 
 The provider worker uses the pinned OpenAI-compatible client in
-`requirements.txt`, matching Bitdeer’s official example. It requests plain
+`requirements.txt`. It requests plain
 chat-completion mode for broad deployment compatibility, then applies the
 complete local candidate schema and replay verifier. On Apple Silicon systems
 running an x86_64 Neovim, the demo prefers `.venv-x86` automatically.
@@ -182,19 +233,10 @@ arch -x86_64 python3 -m venv .venv-x86
 arch -x86_64 .venv-x86/bin/python -m pip install -r requirements.txt
 ```
 
-For the current proposal prompt, the tested automatic choice is:
-
-```sh
-BITDEER_MODEL=deepseek-ai/DeepSeek-V4-Flash
-```
-
-`DeepSeek-V4.1-Flash` is reachable, but it spends the bounded completion
-budget on hidden reasoning for this task and may return no text content.
-
-When `cloud_enabled = true`, the plugin starts the local worker after a
-completed capture and ignores stale results from superseded episodes. Use
-`:VimCoachAnalyze` to retry the latest captured episode manually. The default
-configuration keeps this path disabled.
+When `cloud_enabled = true`, the plugin starts the local worker only after a
+manual `:VimCoachSync` (or the backwards-compatible `:VimCoachAnalyze`).
+Completed captures remain local until that batch trigger. The default
+configuration keeps cloud analysis disabled.
 
 The minimal demo reads that opt-in from `VIM_COACH_CLOUD`:
 
@@ -202,14 +244,62 @@ The minimal demo reads that opt-in from `VIM_COACH_CLOUD`:
 VIM_COACH_CLOUD=1 nvim -u demo/minimal.lua -i NONE -n
 ```
 
+The development demo enables `debug_prompt = true`. The Electron process tails
+the local debug stream and prints the formatted LLM request, response, and replay
+result in the terminal running `npm start`. Restart the Electron app after code
+changes to enable the watcher. Debug requests include captured buffer text, so
+keep the option disabled for private files.
+
+The review inbox updates through a filesystem watcher on `lessons.json`; lesson
+cards are pushed to the renderer over Electron IPC rather than polled. Worker
+status remains polled for the short-lived loading indicator.
+
 ## Current limits
 
 The finished prototype is intentionally narrow: one native Neovim profile,
-ordinary file buffers, bounded ASCII Normal-mode motion/deletion commands, and
+ordinary file buffers, bounded Normal-mode motion/deletion commands, and
 in-memory episode state. Visual mode, insert/change proposals, mappings,
 macros, search, paste, cross-file edits, and VSCodeVim integration remain
 future work. The replay child is a deterministic process, not a general OS
 security sandbox.
+
+## Next architecture: batch review app
+
+The next implementation should follow this loop:
+
+```text
+Neovim capture → local queue → batched LLM request → replay verification
+→ persisted lesson inbox → separate review/practice app
+```
+
+Neovim must not call the provider or open a suggestion card after each edit.
+It should only record bounded episodes, show a quiet pending-count/status
+indicator, and expose a manual `:VimCoachSync` command. An explicit sync sends
+every episode currently waiting in the bounded local queue.
+
+The local worker accepts an array of episodes, asks the model for suggestions,
+replay-verifies every candidate, and persists only verified lesson metadata.
+Source snapshots should remain ephemeral by default; persisted history should contain tokens, concepts,
+explanations, counts, timestamps, and verification scope unless the user
+explicitly opts into keeping practice examples.
+
+The separate app can start as an Electron review inbox backed by a local JSON
+or SQLite state directory. It should provide Review, Practice, Dismiss, I
+Know, and Reset controls. No public backend, account system, or vector database
+is required for the first version. Retrieval can begin with concept IDs,
+token-pattern matching, and recent practice history; add embeddings only if
+that simple retrieval is demonstrably insufficient.
+
+Implementation order:
+
+1. Replace per-episode worker calls with a bounded local queue.
+2. Add a batch request/response contract keyed by episode ID.
+3. Add local lesson history and retrieval without raw source by default.
+4. Preserve replay verification as the acceptance gate for every suggestion.
+5. Build the separate review app and local IPC/state protocol.
+6. Move Practice, Dismiss, I Know, and cooldown state into the review app.
+7. Remove or disable the inline suggestion card and measure review/practice
+   completion.
 
 Available commands:
 
@@ -217,6 +307,7 @@ Available commands:
 :VimCoachPause
 :VimCoachResume
 :VimCoachStatus
+:VimCoachSync
 :VimCoachAnalyze
 :VimCoachLesson
 :VimCoachDismiss

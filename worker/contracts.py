@@ -8,8 +8,10 @@ from replay.verify import validate_tokens
 
 
 SCHEMA_VERSION = 1
+BATCH_SCHEMA_VERSION = 2
 MAX_CANDIDATES = 3
 MAX_TOKENS = 128
+MOVEMENT_KEYS = {"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "ge", "gg", "G", "0", "^", "$", "%"}
 
 
 class ContractError(ValueError):
@@ -32,7 +34,7 @@ def response_schema() -> dict[str, Any]:
                 "type": "object",
                 "properties": {
                     "kind": {"enum": ["move"]},
-                    "key": {"enum": ["h", "l", "w", "b", "e", "0", "^", "$" ]},
+                    "key": {"enum": sorted(MOVEMENT_KEYS)},
                 },
                 "required": ["kind", "key"],
                 "additionalProperties": False,
@@ -92,9 +94,9 @@ def _compile_token(token: dict[str, Any]) -> list[str]:
         return list(str(value))
     if kind == "move":
         key = token.get("key")
-        if key not in {"h", "l", "w", "b", "e", "0", "^", "$"}:
+        if key not in MOVEMENT_KEYS:
             raise ContractError("unsupported movement key")
-        return [key]
+        return list(key)
     if kind == "delete":
         command = token.get("command")
         if command not in {"x", "D", "dd", "dw", "diw", "daw"}:
@@ -117,7 +119,9 @@ def compile_tokens(tokens: Any) -> list[str]:
             "delete": {"kind", "command"},
         }.get(kind)
         if required is None:
-            raise ContractError(f"token {index} has an unknown kind")
+            raise ContractError(
+                f"token {index} has unknown kind {kind!r}; expected count, move, or delete"
+            )
         _require_exact_keys(token, required, f"token {index}")
         compiled.extend(_compile_token(token))
     if len(compiled) > MAX_TOKENS:
@@ -149,14 +153,7 @@ def validate_response(value: Any) -> list[dict[str, Any]]:
             raise ContractError(f"candidate {index} explanation is invalid")
         normalized_tokens = []
         for token in candidate["tokens"]:
-            if (
-                isinstance(token, dict)
-                and token.get("kind") == "move"
-                and "key" not in token
-                and set(token) == {"kind", "command"}
-            ):
-                token = {"kind": "move", "key": token["command"]}
-            normalized_tokens.append(token)
+            normalized_tokens.append(_normalize_token(token))
         compiled = compile_tokens(normalized_tokens)
         validated.append({
             "tokens": normalized_tokens,
@@ -164,4 +161,95 @@ def validate_response(value: Any) -> list[dict[str, Any]]:
             "concept": candidate["concept"][:64],
             "explanation": candidate["explanation"][:240],
         })
+    return validated
+
+
+def _normalize_token(token: Any) -> Any:
+    """Normalize harmless provider naming variants before strict validation."""
+    movements = MOVEMENT_KEYS
+    deletes = {"x", "D", "dd", "dw", "diw", "daw"}
+    if isinstance(token, str):
+        if token in movements:
+            return {"kind": "move", "key": token}
+        if token in deletes:
+            return {"kind": "delete", "command": token}
+        if token.isdigit() and 1 <= int(token) <= 20:
+            return {"kind": "count", "value": int(token)}
+        return token
+    if not isinstance(token, dict):
+        return token
+    kind = token.get("kind", token.get("type"))
+    aliases = {
+        "motion": "move",
+        "movement": "move",
+        "navigation": "move",
+        "navigate": "move",
+        "key": "move",
+        "repeat": "count",
+        "deletion": "delete",
+        "remove": "delete",
+    }
+    kind = aliases.get(kind, kind)
+    known_fields = {"kind", "type", "key", "command", "value", "count"}
+    if not set(token).issubset(known_fields):
+        return token
+
+    def matching_value(*names: str) -> Any:
+        values = [token[name] for name in names if name in token]
+        if not values or any(value != values[0] for value in values[1:]):
+            return None
+        return values[0]
+
+    if kind == "move":
+        key = matching_value("key", "command", "value")
+        if key is None:
+            return token
+        return {"kind": "move", "key": key}
+    if kind == "count":
+        value = matching_value("value", "count")
+        if value is None:
+            return token
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        return {"kind": "count", "value": value}
+    if kind == "delete":
+        command = matching_value("command", "key", "value")
+        if command is None:
+            return token
+        return {"kind": "delete", "command": command}
+    return token
+
+
+def validate_batch_response(value: Any, max_suggestions: int | None = None) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        raise ContractError("provider batch response must be an object")
+    _require_exact_keys(value, {"schemaVersion", "suggestions"}, "batch response")
+    if value["schemaVersion"] != BATCH_SCHEMA_VERSION:
+        raise ContractError("unsupported provider batch schema version")
+    suggestions = value["suggestions"]
+    if not isinstance(suggestions, list):
+        raise ContractError("suggestions must be an array")
+    if max_suggestions is not None and len(suggestions) > max_suggestions:
+        raise ContractError("suggestions cannot outnumber submitted episodes")
+
+    validated: list[dict[str, Any]] = []
+    for index, suggestion in enumerate(suggestions):
+        if not isinstance(suggestion, dict):
+            raise ContractError(f"suggestion {index} is not an object")
+        if "episodeId" not in suggestion or "candidates" not in suggestion:
+            raise ContractError(f"suggestion {index} requires episodeId and candidates")
+        # Suggestion-level provider metadata is untrusted and unnecessary. Drop
+        # it instead of failing the whole batch; candidate/token objects remain
+        # strictly validated below.
+        suggestion = {
+            "episodeId": suggestion["episodeId"],
+            "candidates": suggestion["candidates"],
+        }
+        if type(suggestion["episodeId"]) is not int:
+            raise ContractError(f"suggestion {index} episodeId is invalid")
+        candidates = validate_response({
+            "schemaVersion": SCHEMA_VERSION,
+            "candidates": suggestion["candidates"],
+        })
+        validated.append({"episodeId": suggestion["episodeId"], "candidates": candidates})
     return validated

@@ -19,8 +19,11 @@ require("vim_coach").setup({
   max_buffer_bytes = 8192,
   max_episode_keys = 128,
   max_episode_ms = 10000,
+  min_navigation_keys = 4,
   max_candidates = 3,
   provider_timeout_ms = 10000,
   replay_timeout_ms = 1000,
+  -- Development only: prints captured source text and the full LLM request.
+  debug_prompt = true,
   worker_cwd = repo_root,
 })

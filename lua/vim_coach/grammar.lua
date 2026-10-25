@@ -2,20 +2,35 @@ local M = {}
 
 local motions = {
   ["h"] = true,
+  ["j"] = true,
+  ["k"] = true,
   ["l"] = true,
   ["w"] = true,
   ["b"] = true,
   ["e"] = true,
+  ["W"] = true,
+  ["B"] = true,
+  ["E"] = true,
+  ["G"] = true,
+  ["%"] = true,
   ["^"] = true,
   ["$"] = true,
 }
 
 local supported = {
   ["h"] = true,
+  ["j"] = true,
+  ["k"] = true,
   ["l"] = true,
   ["w"] = true,
   ["b"] = true,
   ["e"] = true,
+  ["W"] = true,
+  ["B"] = true,
+  ["E"] = true,
+  ["G"] = true,
+  ["g"] = true,
+  ["%"] = true,
   ["0"] = true,
   ["^"] = true,
   ["$"] = true,
@@ -97,6 +112,13 @@ local function parse_command(tokens, index)
     return index + 1, nil
   end
 
+  if token == "g" then
+    if tokens[index + 1] == "g" or tokens[index + 1] == "e" then
+      return index + 2, nil
+    end
+    return nil, "unsupported g motion"
+  end
+
   if motions[token] or token == "x" or token == "D" then
     return index + 1, nil
   end
@@ -138,6 +160,19 @@ function M.validate(tokens)
     index = next_index
   end
 
+  return true
+end
+
+function M.is_navigation_only(tokens)
+  local valid = M.validate(tokens)
+  if not valid then
+    return false
+  end
+  for _, token in ipairs(tokens) do
+    if not is_digit(token) and token ~= "0" and token ~= "g" and not motions[token] then
+      return false
+    end
+  end
   return true
 end
 
